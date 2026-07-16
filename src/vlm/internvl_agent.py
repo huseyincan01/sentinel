@@ -215,10 +215,10 @@ class InternVLAgent:
 
     @property
     def is_loaded(self) -> bool:
-        return self._loaded or self.generator_fn is not None or self.gate_generator_fn is not None
+        return self._loaded or self.generator_fn is not None
 
     def load(self) -> "InternVLAgent":
-        if self.backend == "mock" or self.generator_fn is not None or self.gate_generator_fn is not None:
+        if self.backend == "mock" or self.generator_fn is not None:
             self._loaded = True
             logger.info("Mock / generator aktif; ağır model indirilmedi. backend=%s", self.backend)
             return self

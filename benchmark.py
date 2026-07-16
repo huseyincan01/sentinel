@@ -85,8 +85,9 @@ def run_benchmark(
         mock_vlm=(backend == "mock"),
         vlm_backend=backend,
         yolo_device="cpu",
-        load_in_4bit=True,
+        load_in_4bit=False,
         use_vllm=use_vllm,
+
     )
     pipe.save_reports = save_reports
     pipe.store_frame_results = False  # Bellek tasarrufu için tüm kare detaylarını tutma

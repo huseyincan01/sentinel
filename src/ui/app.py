@@ -166,21 +166,55 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
             yolo_device="cpu",
             use_real_yolo=True,
             yolo_weights="yolov8n.pt",
-            load_in_4bit=True,
+            load_in_4bit=False,  # Donanım iyi olduğu için quantizasyon tamamen kapatıldı
             use_vllm=_USE_VLLM,
             # auto_load True default — create içinde yüklenecek
         )
         pipe.triage.periodic_interval_s = 7.0
 
-        _set_model(progress=0.45, message="VLM ağırlıkları yükleniyor (birkaç sn sürebilir)…")
+        _set_model(progress=0.15, message="VLM ağırlıkları yükleniyor (birkaç sn sürebilir)…")
+        
+        # VLM yükleme için pürüzsüz ilerleme çubuğu animasyonu
+        stop_vlm_progress = False
+        def _vlm_progress_runner():
+            curr = 0.15
+            while not stop_vlm_progress:
+                st_now = get_model_state()
+                if st_now["status"] != "loading" or curr >= 0.70:
+                    break
+                curr += 0.01
+                _set_model(progress=curr)
+                time.sleep(0.4)
+                
+        threading.Thread(target=_vlm_progress_runner, daemon=True, name="vlm-load-progress").start()
+
         if pipe.agent is not None and not pipe.agent.is_loaded:
             pipe.agent.load()
 
+        stop_vlm_progress = True  # İlk thread'i durdur
+
         _set_model(progress=0.75, message="CUDA / model warmup…")
+        
+        # CUDA ısınma (warmup) için pürüzsüz ilerleme çubuğu animasyonu
+        stop_warmup_progress = False
+        def _warmup_progress_runner():
+            curr = 0.75
+            while not stop_warmup_progress:
+                st_now = get_model_state()
+                if st_now["status"] != "loading" or curr >= 0.95:
+                    break
+                curr += 0.02
+                _set_model(progress=curr)
+                time.sleep(0.3)
+                
+        threading.Thread(target=_warmup_progress_runner, daemon=True, name="vlm-warmup-progress").start()
+
         try:
             pipe.warmup()
         except Exception as e:
             logger.warning("Warmup uyarısı: %s", e)
+
+        stop_warmup_progress = True  # İkinci thread'i durdur
 
         _set_model(
             status="ready",
@@ -197,6 +231,9 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
         logger.info("Global model HAZIR mock=%s backend=%s", mock_vlm, vlm_backend)
     except Exception as e:
         logger.exception("Model yükleme hatası")
+        # Bekleyen threadleri durdur
+        stop_vlm_progress = True
+        stop_warmup_progress = True
         _set_model(
             status="error",
             progress=0.0,
@@ -206,6 +243,7 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
         )
 
     return model_status_html()
+
 
 
 def create_pipeline(

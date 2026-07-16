@@ -675,7 +675,11 @@ UI_CSS = """
 def build_ui():
     import gradio as gr
 
-    with gr.Blocks(title="Sentinel — TEKNOFEST 2026") as demo:
+    with gr.Blocks(
+        title="Sentinel — TEKNOFEST 2026",
+        css=UI_CSS,
+        theme=gr.themes.Soft(),
+    ) as demo:
         gr.Markdown(
             "# 🛡️ Sentinel\n"
             "**Dinamik Hibrit Görsel Algı ve Karar Destek Ajanı**  \n"
@@ -846,8 +850,6 @@ def main(share: bool = False, server_name: str = "127.0.0.1", server_port: int =
                 server_name=server_name,
                 server_port=port,
                 show_error=True,
-                css=UI_CSS,
-                theme=gr.themes.Soft(),
                 inbrowser=True,
             )
             break

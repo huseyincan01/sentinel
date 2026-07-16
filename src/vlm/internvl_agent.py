@@ -339,10 +339,42 @@ class InternVLAgent:
             except Exception as exc:
                 err_last = exc
                 continue
+
+        # Eğer quantizasyon sebebiyle veya başka bir uyumsuzluk nedeniyle yüklenemezse ve quantizasyon aktifse:
+        if model is None and ("quantization_config" in load_kwargs or "device_map" in load_kwargs):
+            logger.warning("SmolVLM quantize yükleme başarısız (%s). Standart FP16 modunda tekrar deneniyor...", err_last)
+            kw_fallback = {
+                "torch_dtype": dtype,
+                "low_cpu_mem_usage": True,
+            }
+            if self.device == "cuda" and torch.cuda.is_available():
+                kw_fallback["device_map"] = "auto"
+                
+            for loader_name in (
+                "AutoModelForVision2Seq",
+                "AutoModelForImageTextToText",
+                "Idefics3ForConditionalGeneration",
+                "AutoModel",
+            ):
+                try:
+                    mod = __import__("transformers", fromlist=[loader_name])
+                    cls = getattr(mod, loader_name, None)
+                    if cls is None:
+                        continue
+                    kw = dict(kw_fallback)
+                    if loader_name == "AutoModel":
+                        kw["trust_remote_code"] = True
+                    model = cls.from_pretrained(self.model_id, **kw)
+                    logger.info("SmolVLM quantizasyonsuz başarıyla yüklendi via %s", loader_name)
+                    break
+                except Exception as exc:
+                    err_last = exc
+                    continue
+
         if model is None:
             raise RuntimeError(f"SmolVLM yüklenemedi: {err_last}")
 
-        if "device_map" not in load_kwargs:
+        if "device_map" not in load_kwargs and model.device.type != "cuda":
             if self.device == "cuda" and torch.cuda.is_available():
                 model = model.to("cuda")
             else:
@@ -355,6 +387,7 @@ class InternVLAgent:
         self._loaded = True
         logger.info("SmolVLM hazır (geliştirme backend).")
         return self
+
 
     def _load_internvl(self) -> "InternVLAgent":
         import torch
@@ -397,13 +430,28 @@ class InternVLAgent:
             if self.device == "cuda" and torch.cuda.is_available():
                 load_kwargs["device_map"] = "auto"
 
-        self.model = AutoModel.from_pretrained(self.model_id, **load_kwargs)
+        try:
+            self.model = AutoModel.from_pretrained(self.model_id, **load_kwargs)
+        except Exception as exc:
+            if "quantization_config" in load_kwargs:
+                logger.warning("InternVL quantize yükleme başarısız (%s). Standart FP16 modunda tekrar deneniyor...", exc)
+                load_kwargs.pop("quantization_config", None)
+                load_kwargs["torch_dtype"] = dtype
+                if self.device == "cuda" and torch.cuda.is_available():
+                    load_kwargs["device_map"] = "auto"
+                else:
+                    load_kwargs.pop("device_map", None)
+                self.model = AutoModel.from_pretrained(self.model_id, **load_kwargs)
+            else:
+                raise exc
+
         self.model.eval()
         if self.use_format_enforcer:
             self._prefix_fn = self._build_prefix_fn(analysis_json_schema())
             self._gate_prefix_fn = self._build_prefix_fn(gate_json_schema())
         self._loaded = True
         return self
+
 
     def _build_prefix_fn(self, schema: dict) -> Optional[Callable]:
         if self.tokenizer is None:

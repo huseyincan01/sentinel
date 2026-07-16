@@ -109,10 +109,6 @@ def model_status_html() -> str:
     else:
         color, border, title = "#9CA3AF", "#374151", "⚪ MODEL BEKLENİYOR"
 
-    bar = (
-        f"<div style='background:#111827;border-radius:6px;height:14px;margin-top:8px;overflow:hidden;'>"
-        f"<div style='background:{color};height:100%;width:{pct}%;transition:width 0.3s;'></div></div>"
-    )
     err_html = ""
     if err:
         safe = html.escape(err).replace("\n", "<br>")
@@ -126,7 +122,7 @@ def model_status_html() -> str:
         f"<div style='color:{color};font-size:1.05em;'>{title}</div>"
         f"<div style='color:#D1D5DB;font-size:0.9em;margin-top:6px;font-weight:normal;'>"
         f"{html.escape(msg)}</div>"
-        f"{bar}{err_html}</div>"
+        f"{err_html}</div>"
     )
 
 
@@ -763,15 +759,7 @@ def build_ui():
             elem_id="title",
         )
 
-        model_html = gr.HTML(value=model_status_html(), label="Model")
-        model_bar = gr.Slider(
-            minimum=0,
-            maximum=100,
-            value=0,
-            step=1,
-            label="Model yükleme (%)",
-            interactive=False,
-        )
+        model_html = gr.HTML(value=model_status_html(), label="Model Durumu")
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -827,11 +815,9 @@ def build_ui():
         def _do_load(mock, backend):
             html = load_global_model(mock_vlm=bool(mock), vlm_backend=backend or "smolvlm")
             st = get_model_state()
-            pct = int(st["progress"] * 100)
             ready = st["status"] == "ready"
             return (
                 html,
-                pct,
                 gr.update(interactive=ready),
                 "Model hazır — Analizi Başlat" if ready else st.get("message", ""),
             )
@@ -851,7 +837,6 @@ def build_ui():
             ready = st["status"] == "ready"
             return (
                 html_update,
-                int(st["progress"] * 100),
                 gr.update(interactive=ready),
             )
 
@@ -859,14 +844,14 @@ def build_ui():
         load_btn.click(
             fn=_do_load,
             inputs=[mock_vlm, vlm_backend],
-            outputs=[model_html, model_bar, run_btn, status],
+            outputs=[model_html, run_btn, status],
         )
         # Backend değişince run'ı kilitle, yeniden yüklemeyi hatırlat
         def _on_backend_change(mock, backend):
             st = get_model_state()
             want = "mock" if mock else (backend or "smolvlm")
             if st["status"] == "ready" and st["backend"] == want:
-                return model_status_html(), int(st["progress"] * 100), gr.update(interactive=True)
+                return model_status_html(), gr.update(interactive=True)
             # Eski pipe'in worker'ını durdur — akşi n VRAM serbest kalsın
             old_pipe = st.get("pipe")
             if old_pipe is not None:
@@ -880,17 +865,17 @@ def build_ui():
                 message="Ayar değişti — «Modelı Yükle»'ye basın.",
                 pipe=None,
             )
-            return model_status_html(), 0, gr.update(interactive=False)
+            return model_status_html(), gr.update(interactive=False)
 
         mock_vlm.change(
             fn=_on_backend_change,
             inputs=[mock_vlm, vlm_backend],
-            outputs=[model_html, model_bar, run_btn],
+            outputs=[model_html, run_btn],
         )
         vlm_backend.change(
             fn=_on_backend_change,
             inputs=[mock_vlm, vlm_backend],
-            outputs=[model_html, model_bar, run_btn],
+            outputs=[model_html, run_btn],
         )
 
         run_btn.click(
@@ -908,12 +893,12 @@ def build_ui():
                 load_global_model(mock_vlm=False, vlm_backend="smolvlm")
 
             threading.Thread(target=_bg, daemon=True, name="model-autoload").start()
-            return model_status_html(), 5, gr.update(interactive=False)
+            return model_status_html(), gr.update(interactive=False)
 
         demo.load(
             fn=_autoload,
             inputs=None,
-            outputs=[model_html, model_bar, run_btn],
+            outputs=[model_html, run_btn],
         )
 
         # Periyodik durum tazeleme (yükleme çubuğu)
@@ -921,7 +906,7 @@ def build_ui():
         timer.tick(
             fn=_poll_status,
             inputs=None,
-            outputs=[model_html, model_bar, run_btn],
+            outputs=[model_html, run_btn],
         )
 
     return demo

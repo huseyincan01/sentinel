@@ -11,6 +11,7 @@ Sentinel Gradio arayüzü.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import sys
@@ -30,6 +31,11 @@ from src.pipeline.main_pipeline import (  # noqa: E402
     FrameResult,
     SentinelPipeline,
     build_demo_pipeline,
+)
+from src.vlm.cuda_compat import (  # noqa: E402
+    CudaKernelMismatchError,
+    humanize_cuda_error,
+    is_cuda_kernel_mismatch,
 )
 
 logger = logging.getLogger("sentinel.ui")
@@ -107,16 +113,19 @@ def model_status_html() -> str:
         f"<div style='background:#111827;border-radius:6px;height:14px;margin-top:8px;overflow:hidden;'>"
         f"<div style='background:{color};height:100%;width:{pct}%;transition:width 0.3s;'></div></div>"
     )
-    err_html = (
-        f"<div style='color:#FCA5A5;font-size:0.85em;margin-top:6px;'>{err}</div>"
-        if err
-        else ""
-    )
+    err_html = ""
+    if err:
+        safe = html.escape(err).replace("\n", "<br>")
+        err_html = (
+            f"<div style='color:#FCA5A5;font-size:0.82em;margin-top:6px;"
+            f"font-weight:normal;line-height:1.35;white-space:normal;'>{safe}</div>"
+        )
     return (
         f"<div style='background:#1F2937;color:white;padding:14px;border-radius:8px;"
         f"border:2px solid {border};font-weight:bold;'>"
         f"<div style='color:{color};font-size:1.05em;'>{title}</div>"
-        f"<div style='color:#D1D5DB;font-size:0.9em;margin-top:6px;font-weight:normal;'>{msg}</div>"
+        f"<div style='color:#D1D5DB;font-size:0.9em;margin-top:6px;font-weight:normal;'>"
+        f"{html.escape(msg)}</div>"
         f"{bar}{err_html}</div>"
     )
 
@@ -154,6 +163,8 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
         pipe=None,
     )
 
+    stop_vlm_progress = True
+    stop_warmup_progress = True
     try:
         _set_model(progress=0.15, message="YOLO + triage kuruluyor…")
         pipe = build_demo_pipeline(
@@ -211,7 +222,13 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
 
         try:
             pipe.warmup()
+        except CudaKernelMismatchError as e:
+            stop_warmup_progress = True
+            raise
         except Exception as e:
+            if is_cuda_kernel_mismatch(e):
+                stop_warmup_progress = True
+                raise CudaKernelMismatchError(humanize_cuda_error(e), original=e) from e
             logger.warning("Warmup uyarısı: %s", e)
 
         stop_warmup_progress = True  # İkinci thread'i durdur
@@ -234,11 +251,17 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
         # Bekleyen threadleri durdur
         stop_vlm_progress = True
         stop_warmup_progress = True
+        friendly = humanize_cuda_error(e)
+        title = (
+            "CUDA mimari uyumsuzluğu (torch ↔ GPU)"
+            if is_cuda_kernel_mismatch(e)
+            else "Model yüklenemedi"
+        )
         _set_model(
             status="error",
             progress=0.0,
-            message="Model yüklenemedi",
-            error=str(e),
+            message=title,
+            error=friendly,
             pipe=None,
         )
 
@@ -419,9 +442,15 @@ def analyze_video(
 
         err_sub = ""
         if error:
+            # CUDA rehber mesajı uzun; kısaltma eşiğini yükselt
+            friendly = humanize_cuda_error(error)
+            limit = 520 if is_cuda_kernel_mismatch(friendly) else 160
+            shown = friendly if len(friendly) <= limit else friendly[:limit] + "…"
+            safe = html.escape(shown).replace("\n", "<br>")
             err_sub = (
-                f"<span style='color:#FCA5A5;display:block;margin-top:4px;font-size:0.75em;'>"
-                f"{error[:120]}</span>"
+                f"<span style='color:#FCA5A5;display:block;margin-top:4px;"
+                f"font-size:0.72em;line-height:1.3;text-align:left;font-weight:normal;'>"
+                f"{safe}</span>"
             )
         return f"<div style='{base}{border}'>{header}{line}{focus_sub}{trig_sub}{err_sub}</div>"
 

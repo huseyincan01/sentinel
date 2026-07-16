@@ -5,6 +5,13 @@ from src.vlm.factory import (
     DEFAULT_SMOLVLM_ID,
     create_vlm_agent,
 )
+from src.vlm.cuda_compat import (
+    CudaKernelMismatchError,
+    diagnose_cuda,
+    humanize_cuda_error,
+    is_cuda_kernel_mismatch,
+    verify_cuda_matmul,
+)
 from src.vlm.internvl_agent import (
     InternVLAgent,
     make_mock_gate_generator,
@@ -51,4 +58,9 @@ __all__ = [
     "generate_incident_report",
     "notify_supervisor",
     "trigger_alarm",
+    "CudaKernelMismatchError",
+    "diagnose_cuda",
+    "humanize_cuda_error",
+    "is_cuda_kernel_mismatch",
+    "verify_cuda_matmul",
 ]

@@ -583,8 +583,14 @@ class SentinelPipeline:
                 # Bu thread'de senkron çalış — bitmeden yenisi yok, sürekli sıradaki kare
                 self._execute_vlm_from_snapshot()
             except Exception as e:
-                logger.error("VLM worker döngü hatası: %s", e)
-                self._last_vlm_error = str(e)
+                try:
+                    from src.vlm.cuda_compat import humanize_cuda_error
+
+                    msg = humanize_cuda_error(e)
+                except Exception:
+                    msg = str(e)
+                logger.error("VLM worker döngü hatası: %s", msg)
+                self._last_vlm_error = msg
                 self._vlm_status = "error"
             finally:
                 end = time.monotonic()
@@ -714,7 +720,12 @@ class SentinelPipeline:
             )
             return True
         except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
+            try:
+                from src.vlm.cuda_compat import humanize_cuda_error
+
+                msg = humanize_cuda_error(e)
+            except Exception:
+                msg = f"{type(e).__name__}: {e}"
             logger.error("VLM hatası: %s", msg)
             self._last_vlm_error = msg
             self._vlm_status = "error"
@@ -1058,8 +1069,21 @@ class SentinelPipeline:
         return None
 
     def warmup(self) -> None:
+        """Eager load + CUDA smoke. CUDA kernel mismatch fatal (yukarı fırlatılır)."""
+        from src.vlm.cuda_compat import (
+            CudaKernelMismatchError,
+            ensure_cuda_kernels_or_raise,
+            is_cuda_kernel_mismatch,
+            raise_if_cuda_kernel_mismatch,
+        )
+
         logger.warning("[WARMUP] Eager loading ve CUDA warmup başlatılıyor...")
         try:
+            # Gerçek VLM yolu: model indirmeden önce torch↔GPU smoke
+            if self.agent is not None and getattr(self.agent, "backend", "mock") != "mock":
+                if getattr(self.agent, "device", "cuda") == "cuda":
+                    ensure_cuda_kernels_or_raise()
+
             self.ensure_components()
             if self.tracker is not None:
                 dummy = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -1078,10 +1102,18 @@ class SentinelPipeline:
                         trigger_info="warmup",
                         execute_tools=False,
                     )
+                except CudaKernelMismatchError:
+                    raise
                 except Exception as e:
+                    raise_if_cuda_kernel_mismatch(e)
+                    if is_cuda_kernel_mismatch(e):
+                        raise
                     logger.warning("[WARMUP] VLM warmup uyarısı: %s", e)
                 logger.warning("[WARMUP] VLM 336 warmup tamam.")
+        except CudaKernelMismatchError:
+            raise
         except Exception as e:
+            raise_if_cuda_kernel_mismatch(e)
             logger.error("[WARMUP] Hata: %s", e)
 
 

@@ -53,6 +53,7 @@ Tools, schemas, memory, agent. `test_part3_vlm.py`.
 | 2026-07-15 | JSON parse | pre-validator + prefix injection |
 | 2026-07-15 | Gate+Detail iki şema | **Pipeline tek şema:** AnalysisResult @336 |
 | 2026-07-15 | Backend | `smolvlm` \| `internvl2` \| `mock` |
+| 2026-07-16 | Kaggle CUDA `no kernel image` | `src/vlm/cuda_compat.py`: teşhis + `CudaKernelMismatchError` + Türkçe rehber; generate/load/warmup guard; `tests/test_cuda_compat.py` |
 
 ---
 
@@ -87,6 +88,7 @@ UI, README, `test_part5_pipeline_ui.py`.
 | 2026-07-16 | UI Düzenlemeleri & Geribildirim | VLM'nin işlediği 336x336 karesi canlı önizlemenin hemen altına yerleştirildi. Riskin seviyesine göre (kırmızı/yeşil/turuncu/gri) anlık ince çerçeve çizimi eklendi. Türkçe özet en alta genişletildi. Model yükleme durumundaki titreme/yanıp sönme (flashing) önbellek ile çözüldü. Mock model kilitlenmesi giderildi. |
 | 2026-07-16 | Yükleme Hatası & FP16 Fallback | Kaggle/Colab gibi ortamlarda bitsandbytes 4-bit/8-bit quantize dönüşümü (conversion) hata verirse, sistem otomatik olarak quantizasyonu kaldırıp standart FP16 modunda yükleme yapacak şekilde güçlendirildi. |
 | 2026-07-16 | Quantization İptali & Smooth Bar | Donanımın güçlü olması nedeniyle 4-bit/8-bit sıkıştırma tamamen iptal edildi (varsayılan FP16 yapıldı). Yükleme çubuğunun kesikli sıçramasını engellemek için, VLM yükleme ve warmup aşamalarında arka planda pürüzsüzce (smooth) ilerleyen iş parçacıkları (threading) ile akıcı bir animasyon sağlandı. |
+| 2026-07-16 | Kaggle torch ezilmesin | `requirements-kaggle.txt` (torch yok) + `notebooks/kaggle_setup.md`. Warmup CUDA kernel mismatch’te artık “ready” sayılmıyor; UI model kartı ve VLM hata satırı Türkçe mimari rehberi gösteriyor. |
 
 
 
@@ -113,6 +115,8 @@ Tek VLM @ 336×336  (full veya crop+%20)
 - Kaynak: **AGENTS.md**, **README.md**
 
 Açık iş: kırpma isabeti + SmolVLM tehlike kalitesi.
+
+**Kaggle notu:** `no kernel image` → torch↔GPU; `notebooks/kaggle_setup.md` + `requirements-kaggle.txt`.
 
 ---
 

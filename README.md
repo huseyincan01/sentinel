@@ -51,6 +51,24 @@ uv sync
 uv run pytest tests/ -q
 ```
 
+### Kaggle / Colab
+
+**Torch’u yeniden kurma.** Kaggle’ın ön yüklü CUDA torch’unu kullan; aksi halde sık görülen hata:
+
+`CUDA error: no kernel image is available for execution on the device`
+
+| Dosya | Ne işe yarar |
+|-------|----------------|
+| `requirements-kaggle.txt` | torch **olmadan** paketler |
+| `notebooks/kaggle_setup.md` | Teşhis hücreleri + mock→smolvlm checklist |
+
+```bash
+pip install -r requirements-kaggle.txt   # Kaggle
+# Ana requirements.txt yerel/uv içindir (torch içerir)
+```
+
+Kod: `src/vlm/cuda_compat.py` — yükleme/warmup/inferansta Türkçe mimari uyumsuzluk mesajı.
+
 ## Çalıştırma
 
 ### Gradio

@@ -17,6 +17,8 @@
 # Notlar:
 # - torch GPU tekerleği platforma göre değişir; CUDA uyumsuzsa CPU torch iner.
 #   CUDA için: https://pytorch.org  adresindeki komutu kullanıp torch'u önce kur.
+# - Kaggle/Colab: bu dosyayı kör kurma (torch ezilip "no kernel image" üretebilir).
+#   → requirements-kaggle.txt + notebooks/kaggle_setup.md
 # - Model ağırlıkları (SmolVLM / InternVL2 / yolov8n) pip paketi DEĞİLDİR;
 #   ilk çalıştırmada HuggingFace / Ultralytics indirir.
 # - .venv klasörünü zip'e / Colab'a koyma.

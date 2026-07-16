@@ -20,6 +20,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 import numpy as np
 from pydantic import ValidationError
 
+from src.vlm.cuda_compat import (
+    CudaKernelMismatchError,
+    ensure_cuda_kernels_or_raise,
+    humanize_cuda_error,
+    raise_if_cuda_kernel_mismatch,
+)
 from src.vlm.memory import AgentMemory
 from src.vlm.schemas import (
     AnalysisResult,
@@ -288,6 +294,15 @@ class InternVLAgent:
         import torch
         from transformers import AutoProcessor
 
+        # Kaggle: bozuk torch GPU'da model indirip boşa yüklemeyi önle
+        if self.device == "cuda":
+            try:
+                ensure_cuda_kernels_or_raise()
+            except CudaKernelMismatchError:
+                raise
+            except RuntimeError as exc:
+                logger.warning("CUDA smoke test: %s", exc)
+
         dtype = self._dtype()
         logger.info("SmolVLM yükleniyor: %s", self.model_id)
         self.processor = AutoProcessor.from_pretrained(self.model_id)
@@ -392,6 +407,14 @@ class InternVLAgent:
     def _load_internvl(self) -> "InternVLAgent":
         import torch
         from transformers import AutoModel, AutoTokenizer
+
+        if self.device == "cuda":
+            try:
+                ensure_cuda_kernels_or_raise()
+            except CudaKernelMismatchError:
+                raise
+            except RuntimeError as exc:
+                logger.warning("CUDA smoke test: %s", exc)
 
         dtype = self._dtype()
         logger.info("InternVL yükleniyor: %s", self.model_id)
@@ -520,9 +543,15 @@ class InternVLAgent:
 
         # Dışarıdan try_begin_infer ile kilit alınmış olabilir (reentrant RLock)
         with self._infer_lock:
-            return self._generate_text_locked(
-                prompt, image, max_new_tokens, prefix_fn
-            )
+            try:
+                return self._generate_text_locked(
+                    prompt, image, max_new_tokens, prefix_fn
+                )
+            except CudaKernelMismatchError:
+                raise
+            except Exception as exc:
+                raise_if_cuda_kernel_mismatch(exc)
+                raise
 
     def _generate_text_locked(
         self,
@@ -569,7 +598,14 @@ class InternVLAgent:
                 else:
                     output_ids = self.model.generate(input_ids, **gen_kwargs)
             except TypeError:
-                output_ids = self.model.generate(input_ids, **gen_kwargs)
+                try:
+                    output_ids = self.model.generate(input_ids, **gen_kwargs)
+                except Exception as exc:
+                    raise_if_cuda_kernel_mismatch(exc)
+                    raise
+            except Exception as exc:
+                raise_if_cuda_kernel_mismatch(exc)
+                raise
 
         gen_ids = output_ids[0]
         if gen_ids.shape[0] > input_ids.shape[-1]:
@@ -706,12 +742,16 @@ class InternVLAgent:
         }
 
         with torch.no_grad():
-            generated = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens or self.max_new_tokens,
-                do_sample=False,
-                repetition_penalty=1.3,
-            )
+            try:
+                generated = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens or self.max_new_tokens,
+                    do_sample=False,
+                    repetition_penalty=1.3,
+                )
+            except Exception as exc:
+                raise_if_cuda_kernel_mismatch(exc)
+                raise
         # Girdi uzunluğunu at
         in_len = inputs["input_ids"].shape[-1]
         out_ids = generated[:, in_len:]

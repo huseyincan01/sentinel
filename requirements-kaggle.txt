@@ -1,0 +1,39 @@
+# =============================================================================
+# Sentinel — Kaggle / Colab güvenli bağımlılıklar
+# =============================================================================
+# KURAL: torch ve torchvision BU listede YOKTUR.
+# Kaggle oturumunun önceden yüklü CUDA torch'unu KORU.
+#
+# Yanlış:  pip install -r requirements.txt   (torch'u ezebilir → no kernel image)
+# Doğru:   pip install -r requirements-kaggle.txt
+#
+# Ayrıntı: notebooks/kaggle_setup.md
+# Python: 3.10+ (Kaggle genelde 3.10/3.11) — proje hedefi 3.12; notebook'ta
+#          dil sürümünü kontrol et. Çoğu paket 3.10 ile de çalışır.
+# =============================================================================
+
+numpy>=1.26.0,<3
+pyyaml>=6.0.1
+pydantic>=2.7.0,<3
+Pillow>=10.0.0
+
+opencv-python-headless>=4.8.0
+ultralytics>=8.3.0
+scikit-image>=0.22.0
+scipy>=1.11.0
+
+# torch / torchvision — KASITLI OLARAK YOK (Kaggle ön yüklü)
+transformers>=4.46.0
+huggingface_hub>=0.26.0
+accelerate>=0.34.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
+lm-format-enforcer>=0.10.0
+httpx>=0.27.0
+einops>=0.8.0
+
+# quant isteğe bağlı; kernel mismatch'te zaten FP16 kullanıyoruz
+bitsandbytes>=0.43.0
+
+gradio>=4.44.0
+pytest>=8.0.0

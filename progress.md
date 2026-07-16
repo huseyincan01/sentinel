@@ -86,6 +86,8 @@ UI, README, `test_part5_pipeline_ui.py`.
 | 2026-07-16 | Kaggle/Colab entegrasyonu ve Hız | `main.py` ve `benchmark.py` dosyalarına `--share` ve `--vllm` CLI argümanları eklendi. Bulut ortamlarında çıkarımı 5-10 kat hızlandırmak için **vLLM** entegre edildi. Windows/GPU-suz ortamlarda otomatik `transformers` kütüphanesine güvenli fallback sağlandı. |
 | 2026-07-16 | UI Düzenlemeleri & Geribildirim | VLM'nin işlediği 336x336 karesi canlı önizlemenin hemen altına yerleştirildi. Riskin seviyesine göre (kırmızı/yeşil/turuncu/gri) anlık ince çerçeve çizimi eklendi. Türkçe özet en alta genişletildi. Model yükleme durumundaki titreme/yanıp sönme (flashing) önbellek ile çözüldü. Mock model kilitlenmesi giderildi. |
 | 2026-07-16 | Yükleme Hatası & FP16 Fallback | Kaggle/Colab gibi ortamlarda bitsandbytes 4-bit/8-bit quantize dönüşümü (conversion) hata verirse, sistem otomatik olarak quantizasyonu kaldırıp standart FP16 modunda yükleme yapacak şekilde güçlendirildi. |
+| 2026-07-16 | Quantization İptali & Smooth Bar | Donanımın güçlü olması nedeniyle 4-bit/8-bit sıkıştırma tamamen iptal edildi (varsayılan FP16 yapıldı). Yükleme çubuğunun kesikli sıçramasını engellemek için, VLM yükleme ve warmup aşamalarında arka planda pürüzsüzce (smooth) ilerleyen iş parçacıkları (threading) ile akıcı bir animasyon sağlandı. |
+
 
 
 

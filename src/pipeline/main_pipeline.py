@@ -661,7 +661,8 @@ class SentinelPipeline:
 
             if mode == "routine":
                 self._last_vlm_summary = analysis.log
-                self._last_vlm_json = json.dumps({"log": analysis.log, "is_danger": analysis.is_danger}, ensure_ascii=False)
+                # Rutin logları JSON paneline yansıtma (kullanıcı sadece metin görmek istiyor)
+                # self._last_vlm_json = json.dumps({"log": analysis.log, "is_danger": analysis.is_danger}, ensure_ascii=False)
                 self._vlm_last_risk = "Düşük"
                 self._detail_last_risk = "Düşük"
                 
@@ -855,7 +856,12 @@ class SentinelPipeline:
         is_incident = False
         if decision.triggers:
             kinds = {t.kind for t in decision.triggers}
-            if kinds - {TriggerKind.PERIODIC}:
+            high_risk_triggers = {
+                TriggerKind.DANGEROUS_MOTION,
+                TriggerKind.SSIM,
+                TriggerKind.COLOR_FIRE
+            }
+            if kinds.intersection(high_risk_triggers):
                 is_incident = True
                 
         if getattr(self, "_force_next_incident", False):

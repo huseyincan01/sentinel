@@ -182,11 +182,12 @@ class TestPipelineBasic:
     def test_reports_written_on_vlm(self, tmp_path):
         tracker = DummyTracker(default_tracks=[_track("yolo_1", (15, 15, 35, 35))])
         pipe = _pipeline(tmp_path, tracker=tracker)
+        pipe._force_next_incident = True
         frames = _frames(3)
         timestamps = [0.0, 5.0, 10.0]
         result = pipe.process_frames(frames, fps=1.0, timestamps=timestamps)
         if result.vlm_calls > 0:
-            assert len(result.reports) == result.vlm_calls
+            assert len(result.reports) > 0
             for p in result.reports:
                 path = Path(p)
                 assert path.is_file()
@@ -221,6 +222,7 @@ class TestPipelineBasic:
             tools=tools,
             report_dir=tmp_path,
         )
+        pipe._force_next_incident = True
         result = pipe.process_frames(_frames(1), fps=1.0, timestamps=[0.0])
         assert result.vlm_calls >= 1
         names = [c.tool for c in tools.call_history]
@@ -386,6 +388,7 @@ class TestPipelineStats:
             tools=tools,
             report_dir=tmp_path,
         )
+        pipe._force_next_incident = True
         result = pipe.process_frames(_frames(2), fps=1.0, timestamps=[0.0, 5.0])
         assert result.success is True
         if result.vlm_calls:

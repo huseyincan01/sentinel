@@ -841,13 +841,21 @@ class InternVLAgent:
             data = extract_json_object(text)
             
             # Defansif alan atamaları (şema uyumunu garantilemek için)
-            if not isinstance(data.get("events"), list):
+            events = data.get("events", data.get("gecmis_zaman_cizelgesi"))
+            if not isinstance(events, list):
                 data["events"] = []
-            if not isinstance(data.get("actions"), list):
-                if isinstance(data.get("actions"), str):
-                    data["actions"] = [data["actions"]]
+            else:
+                data["events"] = events
+
+            actions = data.get("actions", data.get("aksiyon"))
+            if not isinstance(actions, list):
+                if isinstance(actions, str):
+                    data["actions"] = [actions]
                 else:
                     data["actions"] = []
+            else:
+                data["actions"] = actions
+
             if not isinstance(data.get("tools_called"), list):
                 if isinstance(data.get("tools_called"), str):
                     data["tools_called"] = [data["tools_called"]]
@@ -857,8 +865,12 @@ class InternVLAgent:
                 data["risk"] = "Orta"
             if "risk_score" not in data:
                 data["risk_score"] = 0.5
-            if "summary" not in data or not data["summary"]:
+            
+            summary = data.get("summary", data.get("olay_ozeti"))
+            if not summary:
                 data["summary"] = "Olay tespiti yapıldı (detaylar rapordadır)."
+            else:
+                data["summary"] = summary
 
             data.setdefault("frame_analyzed", frame_idx)
             data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())

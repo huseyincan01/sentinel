@@ -64,11 +64,14 @@ class AnalysisResult(BaseModel):
     Örnek:
     {
       "is_incident": true,
-      "summary": "...",
-      "events": [...],
-      "risk": "Yüksek",
+      "olay_ozeti": "Hızlı gelen forklift, kutu taşıyan işçiye çarptı.",
+      "gecmis_zaman_cizelgesi": [
+         {"time": "00:12", "event": "İşçi kendi halinde taşıma yapıyordu.", "severity": "Düşük"},
+         {"time": "00:14", "event": "Forklift hızla sahneye girdi.", "severity": "Orta"}
+      ],
+      "risk": "Kritik",
       "risk_score": 0.87,
-      "actions": [...],
+      "aksiyon": ["Ambulans Çağır", "Alanı Güvenlik Altına Al"],
       "tools_called": ["call_ambulance", "lock_area"],
       "timestamp": "2026-07-15T00:10:00",
       "frame_analyzed": 450
@@ -79,16 +82,19 @@ class AnalysisResult(BaseModel):
         False, 
         description="Görüntüde kaza, tehlike veya kural ihlali VARSA true; her şey normal/rutin ise false."
     )
-    summary: str = Field(..., description="Türkçe özet (tehlike yoksa çok kısa)")
-    events: List[EventItem] = Field(default_factory=list)
+    summary: str = Field(..., alias="olay_ozeti", description="Türkçe özet (tehlike yoksa çok kısa)")
+    events: List[EventItem] = Field(default_factory=list, alias="gecmis_zaman_cizelgesi")
     risk: RiskLiteral = Field(..., description="Genel risk seviyesi (Normal durumlar için Düşük)")
     risk_score: float = Field(..., ge=0.0, le=1.0)
-    actions: List[str] = Field(default_factory=list)
+    actions: List[str] = Field(default_factory=list, alias="aksiyon")
     tools_called: List[str] = Field(default_factory=list)
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     frame_analyzed: int = Field(0, ge=0)
+
+    class Config:
+        populate_by_name = True
 
     @field_validator("risk", mode="before")
     @classmethod
@@ -139,7 +145,7 @@ class AnalysisResult(BaseModel):
         return f"[{t}] {ev} (risk={self.risk})"
 
     def model_dump_report(self) -> Dict[str, Any]:
-        return self.model_dump()
+        return self.model_dump(by_alias=True)
 
 
 def analysis_json_schema() -> Dict[str, Any]:

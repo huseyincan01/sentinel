@@ -25,10 +25,8 @@ from src.pipeline.main_pipeline import (
 from src.tracking.hybrid_tracker import FrameTracks, TrackedObject
 from src.vlm.internvl_agent import (
     InternVLAgent,
-    make_mock_gate_generator,
     make_mock_generator,
 )
-from src.vlm.schemas import GateDecision
 from src.vlm.tools import ToolRegistry
 
 
@@ -75,7 +73,6 @@ class TestTrackerHighRes:
         tools = ToolRegistry(report_dir=tmp_path)
         agent = InternVLAgent(
             generator_fn=make_mock_generator(),
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
             auto_execute_tools=False,
         )
@@ -92,7 +89,6 @@ class TestTrackerHighRes:
             agent=agent,
             tools=tools,
             report_dir=tmp_path,
-            force_gate_every_candidate=True,
         )
         big = np.zeros((480, 640, 3), dtype=np.uint8)
         pipe.process_frame(big, frame_idx=0, timestamp_s=0.0)
@@ -118,7 +114,6 @@ class TestSingleVlm336:
         tools = ToolRegistry(report_dir=tmp_path)
         agent = InternVLAgent(
             generator_fn=detail_gen,
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
             auto_execute_tools=False,
         )
@@ -136,7 +131,6 @@ class TestSingleVlm336:
             tools=tools,
             report_dir=tmp_path,
             vlm_size=336,
-            force_gate_every_candidate=True,
         )
         big = np.zeros((200, 300, 3), dtype=np.uint8)
         fr = pipe.process_frame(big, frame_idx=0, timestamp_s=0.0)
@@ -156,7 +150,6 @@ class TestSingleVlm336:
 
         agent = InternVLAgent(
             generator_fn=gen,
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
             auto_execute_tools=False,
         )
@@ -174,7 +167,6 @@ class TestSingleVlm336:
             tools=tools,
             report_dir=tmp_path,
             vlm_period_s=2.0,
-            force_gate_every_candidate=False,
             save_reports=False,
         )
         # 0, 0.5, 1.0 → yalnızca 0; 2.0 → ikinci
@@ -206,7 +198,6 @@ class TestSingleVlm336:
 
         agent = InternVLAgent(
             generator_fn=slow_gen,
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
             auto_execute_tools=False,
         )
@@ -249,7 +240,6 @@ class TestBypass:
         tools = ToolRegistry(report_dir=tmp_path)
         agent = InternVLAgent(
             generator_fn=make_mock_generator(),
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
             auto_execute_tools=False,
         )
@@ -268,7 +258,6 @@ class TestBypass:
             agent=agent,
             tools=tools,
             report_dir=tmp_path,
-            force_gate_every_candidate=True,
         )
         frame = np.full((100, 100, 3), 40, dtype=np.uint8)
         last = None
@@ -278,12 +267,7 @@ class TestBypass:
         assert pipe._vlm_call_count >= 1
 
 
-class TestGateSchema:
-    def test_gate_decision_model(self):
-        g = GateDecision(need_high_res=True, confidence=1.2, reason="x", urgency="HIGH")
-        assert g.need_high_res is True
-        assert g.confidence == 1.0
-        assert g.urgency == "high"
+
 
 
 class TestPrepareImage:

@@ -90,6 +90,7 @@ UI, README, `test_part5_pipeline_ui.py`.
 | 2026-07-16 | Yükleme Hatası & FP16 Fallback | Kaggle/Colab gibi ortamlarda bitsandbytes 4-bit/8-bit quantize dönüşümü (conversion) hata verirse, sistem otomatik olarak quantizasyonu kaldırıp standart FP16 modunda yükleme yapacak şekilde güçlendirildi. |
 | 2026-07-16 | Quantization İptali & Smooth Bar | Donanımın güçlü olması nedeniyle 4-bit/8-bit sıkıştırma tamamen iptal edildi (varsayılan FP16 yapıldı). Yükleme çubuğunun kesikli sıçramasını engellemek için, VLM yükleme ve warmup aşamalarında arka planda pürüzsüzce (smooth) ilerleyen iş parçacıkları (threading) ile akıcı bir animasyon sağlandı. |
 | 2026-07-16 | Kaggle torch ezilmesin | `requirements-kaggle.txt` (torch yok) + `notebooks/kaggle_setup.md`. Warmup CUDA kernel mismatch’te artık “ready” sayılmıyor; UI model kartı ve VLM hata satırı Türkçe mimari rehberi gösteriyor. |
+| 2026-07-16 | Mimari kalıntılar | Eski `GateDecision`, `analyze_gate` gibi "Gate/Detail" kalıntıları (`src/vlm/schemas.py`, `src/vlm/internvl_agent.py`, vb.) tamamen temizlendi. Hatalı testler ayıklandı ve tüm `pytest` paketi tekrardan başarıya ulaştırıldı. |
 
 
 

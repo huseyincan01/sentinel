@@ -33,8 +33,8 @@ from src.decision.triage_engine import (
     TriageEngine,
 )
 from src.tracking.hybrid_tracker import FrameTracks, HybridTracker, TrackedObject
-from src.vlm.internvl_agent import InternVLAgent, make_mock_gate_generator, make_mock_generator
-from src.vlm.schemas import AnalysisResult, GateDecision
+from src.vlm.internvl_agent import InternVLAgent, make_mock_generator
+from src.vlm.schemas import AnalysisResult
 from src.vlm.tools import ToolRegistry, ToolResult
 
 logger = logging.getLogger("sentinel.pipeline")
@@ -297,15 +297,7 @@ class SentinelPipeline:
         self._next_vlm_not_before: Optional[float] = None  # duvar saati
         self._vlm_cycle_start: Optional[float] = None
 
-        # Geriye uyum sayaç / bayrak
-        self._gate_busy = False
-        self._detail_busy = False
-        self._gate_call_count = 0
-        self._detail_call_count = 0
-        self._detail_status = "idle"
-        self._detail_last_risk = ""
-        self._gate_status = "idle"
-        self._last_gate: Optional[GateDecision] = None
+        # Ölü kod (Gate) temizlendi
 
         # Snapshot + worker / one-shot
         self._snap_lock = threading.Lock()
@@ -315,19 +307,17 @@ class SentinelPipeline:
         self._vlm_schedule_enabled = False  # True iken process_frame tetikler
         self._vlm_claim_lock = threading.Lock()
 
-    # ---- geriye uyum property ----
-    @property
-    def _gate_call_count_prop(self) -> int:
-        return self._vlm_call_count
+
 
     def ensure_components(self) -> None:
         if self.tracker is None:
-            self.tracker = HybridTracker(device="cpu", use_ultralytics_botsort=False)
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.tracker = HybridTracker(device=device, use_ultralytics_botsort=False)
         if self.agent is None:
             self.agent = InternVLAgent(
                 tools=self.tools,
                 generator_fn=make_mock_generator(),
-                gate_generator_fn=make_mock_gate_generator(),
                 auto_execute_tools=True,
             )
 
@@ -350,14 +340,6 @@ class SentinelPipeline:
         self._next_vlm_not_before = None
         self._vlm_cycle_start = None
         self._vlm_schedule_enabled = False
-        self._gate_busy = False
-        self._detail_busy = False
-        self._gate_call_count = 0
-        self._detail_call_count = 0
-        self._detail_status = "idle"
-        self._detail_last_risk = ""
-        self._gate_status = "idle"
-        self._last_gate = None
         with self._snap_lock:
             self._snapshot = None
         if self.tracker is not None and hasattr(self.tracker, "reset"):
@@ -440,6 +422,7 @@ class SentinelPipeline:
         tracks: List[TrackedObject],
         trigger_info: str,
         cropped: bool,
+        mode: str = "incident",
     ) -> None:
         with self._snap_lock:
             self._snapshot = {
@@ -449,6 +432,7 @@ class SentinelPipeline:
                 "tracks": list(tracks),
                 "trigger_info": trigger_info,
                 "cropped": cropped,
+                "mode": mode,
             }
 
     # ------------------------------------------------------------------
@@ -648,6 +632,7 @@ class SentinelPipeline:
             tracks = list(snap["tracks"])
             trigger_info = snap["trigger_info"]
             cropped = bool(snap["cropped"])
+            mode = snap.get("mode", "incident")
 
         try:
             # Gerçek model yüklü değilse dene
@@ -665,43 +650,57 @@ class SentinelPipeline:
                 tracks=tracks,
                 trigger_info=trigger_info,
                 execute_tools=True,
+                mode=mode,
             )
             self._vlm_call_count += 1
-            self._gate_call_count = self._vlm_call_count
-            self._detail_call_count = self._vlm_call_count
-            self._last_vlm_summary = analysis.summary
-            self._last_vlm_json = json.dumps(
-                analysis.model_dump(), ensure_ascii=False, indent=2
-            )
+            
             self._last_vlm_called_on_frame = frame_idx
             self._last_cropped = cropped
-            self._vlm_last_risk = analysis.risk or ""
-            self._detail_last_risk = self._vlm_last_risk
             self._vlm_triggered_until_frame = frame_idx + 30
             self._last_vlm_error = ""
 
-            risk_lower = (analysis.risk or "").lower()
-            if risk_lower in ("yüksek", "kritik", "high", "critical") or (
-                analysis.events and len(analysis.events) > 0
-            ):
-                self._vlm_status = "danger_found"
-                self._detail_status = "danger_found"
+            if mode == "routine":
+                self._last_vlm_summary = analysis.log
+                self._last_vlm_json = json.dumps({"log": analysis.log, "is_danger": analysis.is_danger}, ensure_ascii=False)
+                self._vlm_last_risk = "Düşük"
+                self._detail_last_risk = "Düşük"
+                
+                if analysis.is_danger:
+                    self._vlm_status = "danger_found"
+                    self._force_next_incident = True
+                else:
+                    self._vlm_status = "no_danger"
+                    
+                logger.info(
+                    "VLM(Routine) #%s frame=%s log=%r is_danger=%s",
+                    self._vlm_call_count,
+                    frame_idx,
+                    analysis.log,
+                    analysis.is_danger,
+                )
+                return True
             else:
-                self._vlm_status = "no_danger"
-                self._detail_status = "no_danger"
+                self._last_vlm_summary = analysis.summary
+                self._last_vlm_json = json.dumps(
+                    analysis.model_dump(), ensure_ascii=False, indent=2
+                )
+                self._vlm_last_risk = analysis.risk or ""
+                self._detail_last_risk = self._vlm_last_risk
 
-            self.triage.notify_vlm_result(
-                risk=analysis.risk,
-                track_ids=[t.track_id for t in tracks],
-                timestamp=time.monotonic(),
-            )
-            # Cooldown kontrolü ve is_incident bayrağı (Kara Kutu Mantığı)
-            current_time = time.monotonic()
-            last_save = getattr(self, "_last_incident_save_ts", 0)
-            in_cooldown = (current_time - last_save) < 15.0  # 15 saniye cooldown
+                risk_lower = (analysis.risk or "").lower()
+                if risk_lower in ("yüksek", "kritik", "high", "critical") or (
+                    analysis.events and len(analysis.events) > 0
+                ):
+                    self._vlm_status = "danger_found"
+                else:
+                    self._vlm_status = "no_danger"
 
-            if getattr(analysis, "is_incident", False):
-                if self.save_reports and not in_cooldown:
+                self.triage.notify_vlm_result(
+                    risk=analysis.risk,
+                    track_ids=[t.track_id for t in tracks],
+                    timestamp=time.monotonic(),
+                )
+                if self.save_reports:
                     fr = FrameResult(
                         frame_idx=frame_idx,
                         timestamp_s=frame_idx / max(fps, 1e-6),
@@ -715,23 +714,16 @@ class SentinelPipeline:
                         tool_results=list(self.agent.last_tool_results),
                     )
                     self._save_report(analysis, fr, fps=fps)
-                    self._last_incident_save_ts = current_time
-                    logger.info("🚨 YENİ VAKA RAPORU OLUŞTURULDU (JSON diske kaydedildi)!")
-                elif in_cooldown:
-                    logger.info("⚠️ Vaka devam ediyor, ancak cooldown süresinde olduğu için yeni JSON yazılmadı.")
-            else:
-                # Rutin durum - sadece hafızaya eklenir, JSON diske yazılmaz
-                pass
 
-            logger.info(
-                "VLM #%s frame=%s cropped=%s risk=%s size=%s",
-                self._vlm_call_count,
-                frame_idx,
-                cropped,
-                analysis.risk,
-                image.shape[:2],
-            )
-            return True
+                logger.info(
+                    "VLM(Incident) #%s frame=%s cropped=%s risk=%s size=%s",
+                    self._vlm_call_count,
+                    frame_idx,
+                    cropped,
+                    analysis.risk,
+                    image.shape[:2],
+                )
+                return True
         except Exception as e:
             try:
                 from src.vlm.cuda_compat import humanize_cuda_error
@@ -755,6 +747,7 @@ class SentinelPipeline:
         ts: float,
         trigger: str,
         cropped: bool,
+        mode: str = "incident",
     ) -> None:
         """Senkron test/benchmark yolu — tek 336 girdi, high-res yok."""
         analysis = self.agent.analyze_detail(
@@ -764,32 +757,39 @@ class SentinelPipeline:
             tracks=tracks,
             trigger_info=trigger,
             execute_tools=True,
+            mode=mode,
         )
         result.vlm_called = True
         result.gate_called = True
-        result.analysis = analysis
-        result.tool_results = list(self.agent.last_tool_results)
         result.vlm_input_shape = tuple(image_336.shape)
         result.detail_high_res_shape = tuple(image_336.shape)
         result.gate_low_res_size = (self.vlm_size, self.vlm_size)
         result.cropped = cropped
         self._vlm_call_count += 1
-        self._gate_call_count = self._vlm_call_count
-        self._detail_call_count = self._vlm_call_count
         self._last_vlm_ts = ts
-        self._last_vlm_summary = analysis.summary
-        self._last_vlm_json = json.dumps(
-            analysis.model_dump(), ensure_ascii=False, indent=2
-        )
         self._last_vlm_called_on_frame = idx
         self._last_cropped = cropped
-        self._vlm_last_risk = analysis.risk or ""
-        self.triage.notify_vlm_result(
-            risk=analysis.risk,
-            track_ids=[t.track_id for t in tracks],
-            timestamp=ts,
-        )
-        if getattr(analysis, "is_incident", False):
+        
+        if mode == "routine":
+            result.analysis = None
+            self._last_vlm_summary = analysis.log
+            self._last_vlm_json = json.dumps({"log": analysis.log, "is_danger": analysis.is_danger}, ensure_ascii=False)
+            self._vlm_last_risk = "Düşük"
+            if analysis.is_danger:
+                self._force_next_incident = True
+        else:
+            result.analysis = analysis
+            result.tool_results = list(self.agent.last_tool_results)
+            self._last_vlm_summary = analysis.summary
+            self._last_vlm_json = json.dumps(
+                analysis.model_dump(), ensure_ascii=False, indent=2
+            )
+            self._vlm_last_risk = analysis.risk or ""
+            self.triage.notify_vlm_result(
+                risk=analysis.risk,
+                track_ids=[t.track_id for t in tracks],
+                timestamp=ts,
+            )
             if self.save_reports:
                 path = self._save_report(analysis, result, fps=fps)
                 result.report_path = str(path)
@@ -852,8 +852,20 @@ class SentinelPipeline:
         result.gate_low_res_size = (self.vlm_size, self.vlm_size)
         result.detail_high_res_shape = tuple(image_336.shape)
 
+        is_incident = False
+        if decision.triggers:
+            kinds = {t.kind for t in decision.triggers}
+            if kinds - {TriggerKind.PERIODIC}:
+                is_incident = True
+                
+        if getattr(self, "_force_next_incident", False):
+            is_incident = True
+            self._force_next_incident = False
+
+        mode = "incident" if is_incident else "routine"
+
         self._publish_snapshot(
-            image_336, idx, fps, tracks, trigger_info, cropped
+            image_336, idx, fps, tracks, trigger_info, cropped, mode=mode
         )
 
         if not run_async:
@@ -869,6 +881,7 @@ class SentinelPipeline:
                     ts,
                     trigger_info,
                     cropped,
+                    mode=mode,
                 )
             self.last_frame_result = result
             return result
@@ -1173,10 +1186,8 @@ def build_demo_pipeline(
 
     if mock_vlm or vlm_backend == "mock":
         agent = InternVLAgent(
-            backend="mock",
-            generator_fn=make_mock_generator(),
-            gate_generator_fn=make_mock_gate_generator(),
             tools=tools,
+            generator_fn=make_mock_generator() if mock_vlm else None,
             auto_execute_tools=True,
             use_vllm=use_vllm,
         )

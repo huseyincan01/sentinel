@@ -12,7 +12,6 @@ from typing import Any, Literal, Optional
 
 from src.vlm.internvl_agent import (
     InternVLAgent,
-    make_mock_gate_generator,
     make_mock_generator,
 )
 from src.vlm.tools import ToolRegistry
@@ -48,8 +47,6 @@ def create_vlm_agent(
             model_id=model_id or "mock",
             tools=tools,
             generator_fn=kwargs.pop("generator_fn", None) or make_mock_generator(),
-            gate_generator_fn=kwargs.pop("gate_generator_fn", None)
-            or make_mock_gate_generator(),
             device=device,
             auto_execute_tools=kwargs.pop("auto_execute_tools", True),
             use_vllm=use_vllm,

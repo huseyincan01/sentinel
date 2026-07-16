@@ -29,10 +29,10 @@ from src.vlm.cuda_compat import (
 from src.vlm.memory import AgentMemory
 from src.vlm.schemas import (
     AnalysisResult,
-    GateDecision,
+    RoutineLogResult,
     KNOWN_TOOLS,
     analysis_json_schema,
-    gate_json_schema,
+    routine_json_schema,
 )
 from src.vlm.tools import ToolRegistry, ToolResult
 
@@ -47,20 +47,18 @@ _GLOBAL_MODEL_CACHE = {}
 
 SYSTEM_PROMPT_DETAIL = (
     "Sen Sentinel adlı gelişmiş endüstriyel güvenlik ve tehlike analiz uzmanısın. "
-    "YÜKSEK çözünürlüklü görüntüyü ve geçmiş olay bağlamını incele.\n"
-    "ÖNEMLİ KURAL: Üretimi HIZLANDIRMAK için, eğer görüntüde HİÇBİR TEHLİKE veya KAZA YOKSA "
-    "(her şey normalse) KESİNLİKLE JSON ÜRETME! Sadece şu formatta kısacık tek bir cümle yaz: "
-    "'NORMAL: [ne olduğu]'. Örnek: 'NORMAL: İşçi güvenle yürüyor.'\n"
-    "Eğer alev, kaza, çarpışma, yaralanma vb. TEHLİKE VARSA, durumu tam olarak açıklamak için "
-    "SADECE GEÇERLİ JSON ÜRET (is_incident=true yapıp events listesini doldur)."
+    "YÜKSEK çözünürlüklü (yakınlaştırılmış/odaklanmış) görüntüyü ve geçmiş olay bağlamını incele. "
+    "Görüntüde ne olduğunu (örneğin: alev, duman, yangın, kıvılcım, devrilen forklift, yerde hareketsiz yatan insan, "
+    "baret/yelek takmayan personel, tehlikeli iş aletleri vb.) fiziksel ve görsel detaylarıyla tam olarak açıkla. "
+    "Yanıtın SADECE geçerli JSON olmalıdır. Türkçe 'summary' alanında olayı detaylıca açıkla."
 )
 
-SYSTEM_PROMPT_GATE = (
-    "Sen Sentinel güvenlik hakemisin. DÜŞÜK çözünürlüklü görüntü ve aday sinyaller verildi. "
-    "Görüntüde herhangi bir yangın (alev/duman), kaza, devrilme, yaralanma veya baret/yelek ihlali şüphesi var mı? "
-    "Görevin: yüksek çözünürlüklü detaylı VLM analizi GEREKLİ Mİ karar ver. "
-    "Yanıtın SADECE şu alanlarda JSON: need_high_res (bool), confidence (0-1), "
-    "reason (Türkçe gerekçe), urgency (low|medium|high|critical)."
+
+SYSTEM_PROMPT_ROUTINE = (
+    "Sen Sentinel adlı güvenlik ajanısın. Bu kare rutin bir karedir ve kaza/olay beklenmemektedir. "
+    "SADECE sahnede olanları tek bir kısa cümleyle (Seyir Defteri logu) özetle. "
+    "Eğer bariz bir tehlike görürsen 'is_danger' değerini true yap. "
+    "Yanıtın SADECE geçerli JSON olmalıdır."
 )
 
 
@@ -111,31 +109,30 @@ def build_analysis_prompt(
     return "\n".join(parts)
 
 
-def build_gate_prompt(
-    candidate_summary: str,
+
+
+
+def build_routine_prompt(
     frame_idx: int = 0,
     fps: float = 30.0,
     track_context: str = "",
 ) -> str:
     t = _frame_time_str(frame_idx, fps)
     parts = [
-        SYSTEM_PROMPT_GATE,
+        SYSTEM_PROMPT_ROUTINE,
         "",
         f"Zaman: {t} (frame={frame_idx}).",
-        f"Aday sinyaller: {candidate_summary or 'yok'}",
     ]
     if track_context:
-        parts.append(f"Track: {track_context}")
-    parts.append(
-        "Bu düşük çözünürlüklü kareye bakarak high-res detay gerekli mi? "
-        "Yalnızca Gate JSON döndür."
-    )
+        parts.append(f"Takip bağlamı: {track_context}")
+    parts.append("Lütfen bu rutin kare için kısa log JSON'unu üret:")
     return "\n".join(parts)
+
 
 
 class InternVLAgent:
     """
-    Gate (low-res) + Detail (high-res) VLM ajanı.
+    VLM ajanı (SmolVLM / InternVL2 / mock).
 
     backend:
       - smolvlm  : geliştirme (4050 varsayılan)
@@ -154,10 +151,8 @@ class InternVLAgent:
         sticky_size: int = 5,
         tools: Optional[ToolRegistry] = None,
         generator_fn: Optional[Callable[..., str]] = None,
-        gate_generator_fn: Optional[Callable[..., str]] = None,
         use_format_enforcer: bool = True,
         max_new_tokens: int = 512,
-        max_gate_tokens: int = 128,
         auto_execute_tools: bool = True,
         backend: str = DEFAULT_BACKEND,
         use_vllm: bool = False,
@@ -183,13 +178,11 @@ class InternVLAgent:
         self.memory = AgentMemory(window_size=window_size, sticky_size=sticky_size)
         self.tools = tools or ToolRegistry()
         self.generator_fn = generator_fn
-        self.gate_generator_fn = gate_generator_fn
         # SmolVLM'de lm-format-enforcer tokenizer uyumu zayıf olabilir
         if self.backend == "smolvlm":
             use_format_enforcer = False
         self.use_format_enforcer = use_format_enforcer
         self.max_new_tokens = max_new_tokens
-        self.max_gate_tokens = max_gate_tokens
         self.auto_execute_tools = auto_execute_tools
         self.use_vllm = use_vllm
 
@@ -198,14 +191,11 @@ class InternVLAgent:
         self.processor = None  # SmolVLM
         self.vllm_llm = None  # vLLM motoru
         self._prefix_fn = None
-        self._gate_prefix_fn = None
+        self._routine_prefix_fn = None
         self._loaded = False
         self.last_raw_text: Optional[str] = None
-        self.last_gate_raw: Optional[str] = None
         self.last_tool_results: List[ToolResult] = []
-        self.last_gate: Optional[GateDecision] = None
-        # Gate/detail aynı GPU modelini paylaşır → generate serileşir
-        # Gate asla detail bitene kadar BEKLEMEZ (try_acquire); periodu kaçırır.
+        # Detail VLM generate serileşir
         self._infer_lock = threading.RLock()
 
 
@@ -482,6 +472,7 @@ class InternVLAgent:
         if self.use_format_enforcer:
             self._prefix_fn = self._build_prefix_fn(analysis_json_schema())
             self._gate_prefix_fn = self._build_prefix_fn(gate_json_schema())
+            self._routine_prefix_fn = self._build_prefix_fn(routine_json_schema())
         self._loaded = True
         return self
 
@@ -818,44 +809,17 @@ class InternVLAgent:
         default_time: Optional[str] = None,
     ) -> AnalysisResult:
         self.last_raw_text = text
-        
-        # --- HIZLI ÇIKIŞ (FAST EXIT) - JSON BYPASS ---
-        # Eğer VLM sadece "NORMAL:" ile başlayan metin döndürdüyse JSON kontrolünü atla
-        clean_text = text.strip()
-        if clean_text.upper().startswith("NORMAL:"):
-            summary = clean_text[7:].strip()
-            if not summary:
-                summary = "Rutin izleme."
-            return AnalysisResult(
-                is_incident=False,
-                summary=summary,
-                events=[],
-                risk="Düşük",
-                risk_score=0.0,
-                actions=[],
-                tools_called=[],
-                frame_analyzed=frame_idx,
-            )
-
         try:
             data = extract_json_object(text)
             
             # Defansif alan atamaları (şema uyumunu garantilemek için)
-            events = data.get("events", data.get("gecmis_zaman_cizelgesi"))
-            if not isinstance(events, list):
+            if not isinstance(data.get("events"), list):
                 data["events"] = []
-            else:
-                data["events"] = events
-
-            actions = data.get("actions", data.get("aksiyon"))
-            if not isinstance(actions, list):
-                if isinstance(actions, str):
-                    data["actions"] = [actions]
+            if not isinstance(data.get("actions"), list):
+                if isinstance(data.get("actions"), str):
+                    data["actions"] = [data["actions"]]
                 else:
                     data["actions"] = []
-            else:
-                data["actions"] = actions
-
             if not isinstance(data.get("tools_called"), list):
                 if isinstance(data.get("tools_called"), str):
                     data["tools_called"] = [data["tools_called"]]
@@ -865,12 +829,8 @@ class InternVLAgent:
                 data["risk"] = "Orta"
             if "risk_score" not in data:
                 data["risk_score"] = 0.5
-            
-            summary = data.get("summary", data.get("olay_ozeti"))
-            if not summary:
+            if "summary" not in data or not data["summary"]:
                 data["summary"] = "Olay tespiti yapıldı (detaylar rapordadır)."
-            else:
-                data["summary"] = summary
 
             data.setdefault("frame_analyzed", frame_idx)
             data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
@@ -903,61 +863,26 @@ class InternVLAgent:
                 frame_analyzed=frame_idx,
             )
 
-    def parse_gate(self, text: str) -> GateDecision:
-        self.last_gate_raw = text
+    def parse_routine(
+        self,
+        text: str,
+        frame_idx: int = 0,
+        default_time: Optional[str] = None,
+    ) -> RoutineLogResult:
+        self.last_raw_text = text
         try:
             data = extract_json_object(text)
-            return GateDecision.model_validate(data)
+            log_str = data.get("log", f"{default_time} - Rutin kare işlendi.")
+            is_danger = bool(data.get("is_danger", False))
+            return RoutineLogResult(log=log_str, is_danger=is_danger)
         except (ValueError, json.JSONDecodeError, ValidationError) as exc:
-            logger.warning("Gate JSON fallback: %s | Raw text: %r", exc, text)
-            return GateDecision(
-                need_high_res=False,
-                confidence=0.0,
-                reason="Analiz edilemedi",
-                urgency="low",
+            logger.warning("Routine JSON fallback Hata: %s | Raw text: %r", exc, text)
+            return RoutineLogResult(
+                log=f"{default_time} - Rutin gözlem (analiz hatası).",
+                is_danger=False
             )
 
-    def analyze_gate(
-        self,
-        frame: Any = None,
-        frame_idx: int = 0,
-        fps: float = 30.0,
-        tracks: Optional[Sequence[Any]] = None,
-        candidate_summary: str = "",
-    ) -> GateDecision:
-        """
-        Low-res hakem: high-res detail gerekli mi?
 
-        frame tercihen zaten düşük çözünürlüklü olmalı (pipeline downscale eder).
-        """
-        track_context = self._format_tracks(tracks)
-        prompt = build_gate_prompt(
-            candidate_summary=candidate_summary,
-            frame_idx=frame_idx,
-            fps=fps,
-            track_context=track_context,
-        )
-        if not self.use_format_enforcer:
-            prompt += (
-                "\n\nYanıtını kesinlikle aşağıdaki JSON şemasına uygun olarak üretmelisin. "
-                "Cevabında JSON bloğu dışında hiçbir açıklama veya ek metin bulunmamalıdır:\n"
-                "{\n"
-                '  "need_high_res": true/false,\n'
-                '  "confidence": 0.8,\n'
-                '  "reason": "kısa Türkçe gerekçe",\n'
-                '  "urgency": "low/medium/high/critical"\n'
-                "}\n"
-            )
-        raw = self._generate_text(
-            prompt,
-            image=frame,
-            max_new_tokens=self.max_gate_tokens,
-            prefix_fn=self._gate_prefix_fn,
-            use_gate_generator=True,
-        )
-        gate = self.parse_gate(raw)
-        self.last_gate = gate
-        return gate
 
     def analyze(
         self,
@@ -986,23 +911,48 @@ class InternVLAgent:
         tracks: Optional[Sequence[Any]] = None,
         trigger_info: str = "",
         execute_tools: Optional[bool] = None,
-    ) -> AnalysisResult:
-        """High-res detaylı analiz + memory + tools."""
+        mode: str = "incident",
+    ) -> Union[AnalysisResult, RoutineLogResult]:
+        """High-res detaylı analiz veya rutin log + memory + tools."""
         track_context = self._format_tracks(tracks)
         extra = f"Tetikleyici/geçit: {trigger_info}" if trigger_info else ""
-        prompt = self.build_prompt(
-            frame_idx=frame_idx,
-            fps=fps,
-            track_context=track_context,
-            extra=extra,
-        )
+        
+        if mode == "routine":
+            prompt = build_routine_prompt(frame_idx, fps, track_context)
+            if not self.use_format_enforcer:
+                prompt += (
+                    "\n\nYanıtını kesinlikle aşağıdaki JSON şemasına uygun olarak üretmelisin:\n"
+                    "{\n"
+                    '  "log": "00:12 - İşçi yürüyor, sorun yok.",\n'
+                    '  "is_danger": false\n'
+                    "}\n"
+                )
+            max_tokens = 25
+            pfn = self._routine_prefix_fn
+        else:
+            prompt = self.build_prompt(
+                frame_idx=frame_idx,
+                fps=fps,
+                track_context=track_context,
+                extra=extra,
+            )
+            max_tokens = self.max_new_tokens
+            pfn = self._prefix_fn
+
         raw = self._generate_text(
             prompt,
             image=frame,
-            max_new_tokens=self.max_new_tokens,
-            prefix_fn=self._prefix_fn,
+            max_new_tokens=max_tokens,
+            prefix_fn=pfn,
             use_gate_generator=False,
         )
+        
+        if mode == "routine":
+            routine_result = self.parse_routine(raw, frame_idx, _frame_time_str(frame_idx, fps))
+            self.memory.add(routine_result)
+            self.last_tool_results = []
+            return routine_result
+
         result = self.parse_and_validate(
             raw,
             frame_idx=frame_idx,
@@ -1100,7 +1050,14 @@ def make_mock_generator(fixed: Optional[Dict[str, Any]] = None) -> Callable[...,
         if "[odak]" in p:
             current_part = p.split("[odak]")[-1]
 
-        is_danger = any(k in current_part for k in ("stillness", "dangerous_motion", "color_fire", "roi", "entrance"))
+        is_danger = any(k in current_part for k in ("stillness", "dangerous_motion", "color_fire", "roi", "entrance", "tehlike"))
+        
+        # Eğer rutin prompt ise sadece RoutineLogResult döndür
+        if "rutin bir karedir" in p:
+            if is_danger:
+                return json.dumps({"log": "Rutin karede tehlike şüphesi (mock).", "is_danger": True}, ensure_ascii=False)
+            return json.dumps({"log": "Rutin gözlem, her şey yolunda.", "is_danger": False}, ensure_ascii=False)
+
         if is_danger:
             return json.dumps(high, ensure_ascii=False)
         return json.dumps(low, ensure_ascii=False)
@@ -1109,66 +1066,3 @@ def make_mock_generator(fixed: Optional[Dict[str, Any]] = None) -> Callable[...,
     return _gen
 
 
-def make_mock_gate_generator(
-    fixed: Optional[Dict[str, Any]] = None,
-) -> Callable[..., str]:
-    """Gate VLM mock — yalnızca aday satırına göre need_high_res.
-
-    Not: Tam prompt içinde SYSTEM_PROMPT_GATE 'kaza/devril' içerir; tüm prompt
-    taranırsa mock her zaman escalate ederdi (periyodik gate'i detail'e boğardı).
-    """
-
-    def _gen(prompt: str = "", image: Any = None, **kwargs: Any) -> str:
-        del image, kwargs
-        if fixed is not None:
-            return json.dumps(fixed, ensure_ascii=False)
-        text = prompt or ""
-        # Sadece aday özeti satırına bak (sistem promptundaki tehlike kelimelerini yoksay)
-        cand_line = ""
-        for line in text.splitlines():
-            if line.lower().startswith("aday sinyaller:"):
-                cand_line = line
-                break
-        p = cand_line.lower() if cand_line else ""
-        # Tehlikeli aday türleri → high-res iste
-        danger = any(
-            k in p
-            for k in (
-                "stillness",
-                "hareketsiz",
-                "ssim",
-                "şiddet",
-                "siddet",
-                "kaza",
-                "devril",
-                "critical",
-                "kritik",
-                "dangerous",
-                "entrance",
-                "giriş",
-                "giris",
-                "mog2",
-                "color_fire",
-                "yangın",
-                "yangin",
-                "fire",
-            )
-        )
-        # "aday" / "yok" / "periodic" tek başına escalate etmez
-        if danger:
-            out = {
-                "need_high_res": True,
-                "confidence": 0.85,
-                "reason": "Aday sinyaller detay analizi gerektiriyor",
-                "urgency": "high",
-            }
-        else:
-            out = {
-                "need_high_res": False,
-                "confidence": 0.7,
-                "reason": "Rutin görünüm; high-res gerekmiyor",
-                "urgency": "low",
-            }
-        return json.dumps(out, ensure_ascii=False)
-
-    return _gen

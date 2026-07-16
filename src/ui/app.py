@@ -503,8 +503,6 @@ def analyze_video(
         pipe._frame_idx = 0
         pipe._frame_buffer.clear()
         pipe._vlm_call_count = 0
-        pipe._gate_call_count = 0
-        pipe._detail_call_count = 0
         pipe._vlm_status = "idle"
         pipe._vlm_last_risk = ""
         pipe._last_vlm_summary = "Henüz VLM çalışmadı."

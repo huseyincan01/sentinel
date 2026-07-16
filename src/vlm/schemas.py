@@ -63,38 +63,27 @@ class AnalysisResult(BaseModel):
 
     Örnek:
     {
-      "is_incident": true,
-      "olay_ozeti": "Hızlı gelen forklift, kutu taşıyan işçiye çarptı.",
-      "gecmis_zaman_cizelgesi": [
-         {"time": "00:12", "event": "İşçi kendi halinde taşıma yapıyordu.", "severity": "Düşük"},
-         {"time": "00:14", "event": "Forklift hızla sahneye girdi.", "severity": "Orta"}
-      ],
-      "risk": "Kritik",
+      "summary": "...",
+      "events": [...],
+      "risk": "Yüksek",
       "risk_score": 0.87,
-      "aksiyon": ["Ambulans Çağır", "Alanı Güvenlik Altına Al"],
+      "actions": [...],
       "tools_called": ["call_ambulance", "lock_area"],
       "timestamp": "2026-07-15T00:10:00",
       "frame_analyzed": 450
     }
     """
 
-    is_incident: bool = Field(
-        False, 
-        description="Görüntüde kaza, tehlike veya kural ihlali VARSA true; her şey normal/rutin ise false."
-    )
-    summary: str = Field(..., alias="olay_ozeti", description="Türkçe özet (tehlike yoksa çok kısa)")
-    events: List[EventItem] = Field(default_factory=list, alias="gecmis_zaman_cizelgesi")
-    risk: RiskLiteral = Field(..., description="Genel risk seviyesi (Normal durumlar için Düşük)")
+    summary: str = Field(..., description="Türkçe özet")
+    events: List[EventItem] = Field(default_factory=list)
+    risk: RiskLiteral = Field(..., description="Genel risk seviyesi")
     risk_score: float = Field(..., ge=0.0, le=1.0)
-    actions: List[str] = Field(default_factory=list, alias="aksiyon")
+    actions: List[str] = Field(default_factory=list)
     tools_called: List[str] = Field(default_factory=list)
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     frame_analyzed: int = Field(0, ge=0)
-
-    class Config:
-        populate_by_name = True
 
     @field_validator("risk", mode="before")
     @classmethod
@@ -145,7 +134,7 @@ class AnalysisResult(BaseModel):
         return f"[{t}] {ev} (risk={self.risk})"
 
     def model_dump_report(self) -> Dict[str, Any]:
-        return self.model_dump(by_alias=True)
+        return self.model_dump()
 
 
 def analysis_json_schema() -> Dict[str, Any]:
@@ -153,53 +142,23 @@ def analysis_json_schema() -> Dict[str, Any]:
     return AnalysisResult.model_json_schema()
 
 
-UrgencyLiteral = Literal["low", "medium", "high", "critical"]
-
-
-class GateDecision(BaseModel):
+class RoutineLogResult(BaseModel):
     """
-    Gate (hakem) VLM çıktısı — high-res detail gerekli mi?
-
-    Low-res VLM bu şemayı üretir; tools çağırmaz.
+    Rutin modda üretilen çok kısa 'Seyir Defteri' logu.
+    Örnek: {"log": "00:12 - İşçi yürüyor, sorun yok.", "is_danger": false}
     """
+    log: str = Field(..., description="Sahnenin tek cümlelik kısa özeti (zaman damgası ile)")
+    is_danger: bool = Field(False, description="Eğer karede bariz bir tehlike sezilirse true yapın")
 
-    need_high_res: bool = Field(..., description="High-res detaylı analiz gerekli mi?")
-    confidence: float = Field(0.5, ge=0.0, le=1.0)
-    reason: str = Field("", description="Kısa Türkçe gerekçe")
-    urgency: UrgencyLiteral = Field("medium")
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def clamp_conf(cls, v: Any) -> float:
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            f = 0.5
-        return max(0.0, min(1.0, f))
-
-    @field_validator("urgency", mode="before")
-    @classmethod
-    def norm_urgency(cls, v: Any) -> str:
-        if v is None:
-            return "medium"
-        key = str(v).strip().lower()
-        mapping = {
-            "low": "low",
-            "düşük": "low",
-            "dusuk": "low",
-            "medium": "medium",
-            "orta": "medium",
-            "high": "high",
-            "yüksek": "high",
-            "yuksek": "high",
-            "critical": "critical",
-            "kritik": "critical",
-        }
-        return mapping.get(key, "medium")
+    def to_memory_line(self) -> str:
+        """Bellek prompt satırı."""
+        danger_str = "[TEHLİKE] " if self.is_danger else ""
+        return f"{danger_str}{self.log}"
 
 
-def gate_json_schema() -> Dict[str, Any]:
-    return GateDecision.model_json_schema()
+def routine_json_schema() -> Dict[str, Any]:
+    """Rutin VLM için JSON Schema (lm-format-enforcer)."""
+    return RoutineLogResult.model_json_schema()
 
 
 KNOWN_TOOLS = [

@@ -11,7 +11,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Iterable, List, Optional, Sequence, Union
 
-from src.vlm.schemas import AnalysisResult
+from src.vlm.schemas import AnalysisResult, RoutineLogResult
 
 
 HIGH_RISKS = frozenset({"Yüksek", "Kritik", "high", "critical", "yuksek", "yüksek"})
@@ -41,6 +41,16 @@ class MemoryEvent:
             risk=result.risk,
             frame_analyzed=result.frame_analyzed,
             summary=result.summary,
+        )
+
+    @classmethod
+    def from_routine(cls, result: RoutineLogResult) -> "MemoryEvent":
+        return cls(
+            time="--:--",
+            event=result.to_memory_line(),
+            risk="Yüksek" if result.is_danger else "Düşük",
+            frame_analyzed=0,
+            summary=result.log,
         )
 
     def format_line(self) -> str:
@@ -89,7 +99,7 @@ class AgentMemory:
     def __len__(self) -> int:
         return len(self._window)
 
-    def add(self, item: Union[AnalysisResult, MemoryEvent, dict]) -> MemoryEvent:
+    def add(self, item: Union[AnalysisResult, RoutineLogResult, MemoryEvent, dict]) -> MemoryEvent:
         """Yeni olayı belleğe ekle."""
         event = self._coerce(item)
         self._window.append(event)
@@ -100,16 +110,18 @@ class AgentMemory:
                 self._sticky = self._sticky[-self.sticky_size :]
         return event
 
-    def add_many(self, items: Iterable[Union[AnalysisResult, MemoryEvent, dict]]) -> None:
+    def add_many(self, items: Iterable[Union[AnalysisResult, RoutineLogResult, MemoryEvent, dict]]) -> None:
         for it in items:
             self.add(it)
 
     @staticmethod
-    def _coerce(item: Union[AnalysisResult, MemoryEvent, dict]) -> MemoryEvent:
+    def _coerce(item: Union[AnalysisResult, RoutineLogResult, MemoryEvent, dict]) -> MemoryEvent:
         if isinstance(item, MemoryEvent):
             return item
         if isinstance(item, AnalysisResult):
             return MemoryEvent.from_analysis(item)
+        if isinstance(item, RoutineLogResult):
+            return MemoryEvent.from_routine(item)
         if isinstance(item, dict):
             events = item.get("events") or []
             if events and isinstance(events[0], dict):

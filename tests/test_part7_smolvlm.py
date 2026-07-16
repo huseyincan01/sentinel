@@ -17,10 +17,10 @@ class TestFactory:
         agent = create_vlm_agent(backend="mock", tools=tools, auto_load=True)
         assert agent.backend == "mock"
         assert agent.is_loaded
-        gate = agent.analyze_gate(
-            frame=None, candidate_summary="entrance; stillness"
+        res = agent.analyze(
+            frame=None, trigger_info="entrance; stillness"
         )
-        assert gate.need_high_res is True  # mock danger keywords
+        assert res.risk == "Yüksek"
 
     def test_smolvlm_backend_config_without_download(self, tmp_path):
         """auto_load=False — model indirmeden yapılandırma."""
@@ -54,14 +54,14 @@ class TestInternVLAgentBackendField:
         assert a.model_id == DEFAULT_SMOLVLM_ID or "SmolVLM" in a.model_id
 
     def test_mock_via_generators(self, tmp_path):
-        from src.vlm.internvl_agent import make_mock_gate_generator, make_mock_generator
+        from src.vlm.internvl_agent import make_mock_generator
 
-        a = InternVLAgent(
+        agent = create_vlm_agent(
             backend="mock",
             tools=ToolRegistry(report_dir=tmp_path),
             generator_fn=make_mock_generator(),
-            gate_generator_fn=make_mock_gate_generator(),
+            auto_load=False,
         )
-        a.load()
-        r = a.analyze_detail(frame_idx=1)
+        agent.load()
+        r = agent.analyze_detail(frame_idx=1)
         assert r.summary

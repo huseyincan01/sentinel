@@ -311,6 +311,14 @@ class InternVLAgent:
             "torch_dtype": dtype,
             "low_cpu_mem_usage": True,
         }
+        # T4 / A100 gibi Ampere+ GPU'larda Flash Attention 2 ile 2-3x hız kazanımı
+        if self.device == "cuda":
+            try:
+                import flash_attn  # noqa: F401
+                load_kwargs["attn_implementation"] = "flash_attention_2"
+                logger.info("Flash Attention 2 aktif (SmolVLM).")
+            except ImportError:
+                logger.info("flash_attn kurulu değil; standart attention kullanılıyor.")
         if self.load_in_4bit or self.load_in_8bit:
             try:
                 from transformers import BitsAndBytesConfig

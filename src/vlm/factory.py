@@ -70,7 +70,7 @@ def create_vlm_agent(
             tools=tools,
             use_format_enforcer=kwargs.pop("use_format_enforcer", False),
             auto_execute_tools=kwargs.pop("auto_execute_tools", True),
-            max_new_tokens=kwargs.pop("max_new_tokens", 256),
+            max_new_tokens=kwargs.pop("max_new_tokens", 128),
             use_vllm=use_vllm,
             **kwargs,
         )

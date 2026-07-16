@@ -174,64 +174,27 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
             vlm_backend=vlm_backend if not mock_vlm else "mock",
             vlm_size=336,
             vlm_period_s=2.0,
-            yolo_device="cpu",
+            yolo_device="cuda",  # YOLO'yu CPU'dan GPU'ya aldık, canlı izleme kasmasını çözecek
             use_real_yolo=True,
             yolo_weights="yolov8n.pt",
-            load_in_4bit=False,  # Donanım iyi olduğu için quantizasyon tamamen kapatıldı
+            load_in_4bit=False,  
             use_vllm=_USE_VLLM,
-            # auto_load True default — create içinde yüklenecek
         )
         pipe.triage.periodic_interval_s = 7.0
 
-        _set_model(progress=0.15, message="VLM ağırlıkları yükleniyor (birkaç sn sürebilir)…")
-        
-        # VLM yükleme için pürüzsüz ilerleme çubuğu animasyonu
-        stop_vlm_progress = False
-        def _vlm_progress_runner():
-            curr = 0.15
-            while not stop_vlm_progress:
-                st_now = get_model_state()
-                if st_now["status"] != "loading" or curr >= 0.70:
-                    break
-                curr += 0.01
-                _set_model(progress=curr)
-                time.sleep(0.4)
-                
-        threading.Thread(target=_vlm_progress_runner, daemon=True, name="vlm-load-progress").start()
-
+        _set_model(progress=0.40, message="VLM ağırlıkları belleğe alınıyor (gerçek zamanlı)...")
         if pipe.agent is not None and not pipe.agent.is_loaded:
             pipe.agent.load()
 
-        stop_vlm_progress = True  # İlk thread'i durdur
-
-        _set_model(progress=0.75, message="CUDA / model warmup…")
-        
-        # CUDA ısınma (warmup) için pürüzsüz ilerleme çubuğu animasyonu
-        stop_warmup_progress = False
-        def _warmup_progress_runner():
-            curr = 0.75
-            while not stop_warmup_progress:
-                st_now = get_model_state()
-                if st_now["status"] != "loading" or curr >= 0.95:
-                    break
-                curr += 0.02
-                _set_model(progress=curr)
-                time.sleep(0.3)
-                
-        threading.Thread(target=_warmup_progress_runner, daemon=True, name="vlm-warmup-progress").start()
-
+        _set_model(progress=0.80, message="CUDA ilk çıkarım için ısınıyor (warmup)...")
         try:
             pipe.warmup()
         except CudaKernelMismatchError as e:
-            stop_warmup_progress = True
             raise
         except Exception as e:
             if is_cuda_kernel_mismatch(e):
-                stop_warmup_progress = True
                 raise CudaKernelMismatchError(humanize_cuda_error(e), original=e) from e
             logger.warning("Warmup uyarısı: %s", e)
-
-        stop_warmup_progress = True  # İkinci thread'i durdur
 
         _set_model(
             status="ready",
@@ -248,9 +211,6 @@ def load_global_model(mock_vlm: bool = False, vlm_backend: str = "smolvlm") -> s
         logger.info("Global model HAZIR mock=%s backend=%s", mock_vlm, vlm_backend)
     except Exception as e:
         logger.exception("Model yükleme hatası")
-        # Bekleyen threadleri durdur
-        stop_vlm_progress = True
-        stop_warmup_progress = True
         friendly = humanize_cuda_error(e)
         title = (
             "CUDA mimari uyumsuzluğu (torch ↔ GPU)"
@@ -295,10 +255,10 @@ def create_pipeline(
         vlm_backend=vlm_backend if not mock_vlm else "mock",
         vlm_size=336,
         vlm_period_s=2.0,
-        yolo_device="cpu",
+        yolo_device="cuda",
         use_real_yolo=True,
         yolo_weights="yolov8n.pt",
-        load_in_4bit=True,
+        load_in_4bit=False,
         use_vllm=_USE_VLLM,
     )
     if use_periodic:

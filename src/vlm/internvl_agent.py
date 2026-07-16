@@ -966,9 +966,16 @@ def make_mock_generator(fixed: Optional[Dict[str, Any]] = None) -> Callable[...,
             "frame_analyzed": 450,
         }
         p = (prompt or "").lower()
-        if any(k in p for k in ("forklift", "kaza", "yaralan", "kritik", "devril", "hareketsiz")):
+        # Hafıza/geçmiş kilitlenmesini önlemek için yalnızca şu anki kare tetiğine bak
+        current_part = p
+        if "[odak]" in p:
+            current_part = p.split("[odak]")[-1]
+
+        is_danger = any(k in current_part for k in ("stillness", "dangerous_motion", "color_fire", "roi", "entrance"))
+        if is_danger:
             return json.dumps(high, ensure_ascii=False)
         return json.dumps(low, ensure_ascii=False)
+
 
     return _gen
 

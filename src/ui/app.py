@@ -392,12 +392,12 @@ def analyze_video(
 
 
     if not video_path:
-        yield None, "Lütfen video yükleyin.", default_json, "⚠️ Video yükleyin.", _build_vlm_html("idle")
+        yield None, None, "Lütfen video yükleyin.", default_json, "⚠️ Video yükleyin.", _build_vlm_html("idle")
         return
 
     path = Path(video_path)
     if not path.is_file():
-        yield None, "", default_json, f"❌ Video yok: {video_path}", _build_vlm_html("idle")
+        yield None, None, "", default_json, f"❌ Video yok: {video_path}", _build_vlm_html("idle")
         return
 
     # Model hazır mı?
@@ -411,6 +411,7 @@ def analyze_video(
             except Exception as e:
                 yield (
                     None,
+                    None,
                     f"Pipeline oluşturulamadı: {e}",
                     default_json,
                     f"❌ Mock pipeline hatası: {e}",
@@ -422,6 +423,7 @@ def analyze_video(
             # Önce kullanıcıya durum bildir, ardından yükle.
             yield (
                 None,
+                None,
                 "Model ağırlıkları yükleniyor…",
                 default_json,
                 "⏳ Model ağırlıkları RAM/VRAM'e alınıyor, lütfen bekleyin…",
@@ -432,6 +434,7 @@ def analyze_video(
             if st["status"] != "ready" or st["pipe"] is None:
                 yield (
                     None,
+                    None,
                     f"Model yüklenemedi: {st.get('error')}",
                     default_json,
                     f"❌ {st.get('error') or st.get('message')}",
@@ -439,6 +442,7 @@ def analyze_video(
                 )
                 return
             pipe = st["pipe"]
+
     else:
         pipe: SentinelPipeline = st["pipe"]
 
@@ -447,8 +451,9 @@ def analyze_video(
 
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
-        yield None, "", default_json, f"❌ Video açılamadı: {path.name}", _build_vlm_html("idle")
+        yield None, None, "", default_json, f"❌ Video açılamadı: {path.name}", _build_vlm_html("idle")
         return
+
 
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
@@ -581,13 +586,37 @@ def analyze_video(
             busy_note = " | VLM⚡" if vlm_busy else ""
             crop_note = " | crop" if cropped else ""
             err_note = f" | ERR: {vlm_err[:50]}" if vlm_err else ""
+            # VLM'nin işlediği kareyi al ve çerçeve çiz
+            vlm_image = None
+            with pipe._snap_lock:
+                if pipe._snapshot is not None:
+                    vlm_bgr = pipe._snapshot["image"]
+                    vlm_rgb = cv2.cvtColor(vlm_bgr, cv2.COLOR_BGR2RGB)
+                    
+                    # Risk durumuna göre ince renkli çerçeve çiz
+                    h_v, w_v = vlm_rgb.shape[:2]
+                    vlm_status = getattr(pipe, "_vlm_status", "idle")
+                    if vlm_status == "danger_found":
+                        color = (239, 68, 68)  # İnce Kırmızı
+                    elif vlm_status == "no_danger":
+                        color = (16, 185, 129) # İnce Yeşil
+                    elif vlm_status == "analyzing":
+                        color = (245, 158, 11)  # İnce Turuncu
+                    else:
+                        color = (156, 163, 175) # İnce Gri
+                    
+                    cv2.rectangle(vlm_rgb, (0, 0), (w_v - 1, h_v - 1), color, 3)
+                    vlm_image = vlm_rgb
+
             yield (
                 vis_rgb,
+                vlm_image,
                 last_summary,
                 last_json,
                 f"İşleniyor: Kare {frames_done}/{limit or total} | VLM@336: {vlm_calls}{busy_note}{crop_note}{err_note}",
                 current_html,
             )
+
 
 
             # Gerçek zaman hissi (video FPS)
@@ -648,8 +677,27 @@ def analyze_video(
             f"Mod: {'Mock' if mock_vlm else vlm_backend}{err_line}"
         )
 
+    vlm_image = None
+    with pipe._snap_lock:
+        if pipe._snapshot is not None:
+            vlm_bgr = pipe._snapshot["image"]
+            vlm_rgb = cv2.cvtColor(vlm_bgr, cv2.COLOR_BGR2RGB)
+            h_v, w_v = vlm_rgb.shape[:2]
+            vlm_status = getattr(pipe, "_vlm_status", "idle")
+            if vlm_status == "danger_found":
+                color = (239, 68, 68)
+            elif vlm_status == "no_danger":
+                color = (16, 185, 129)
+            elif vlm_status == "analyzing":
+                color = (245, 158, 11)
+            else:
+                color = (156, 163, 175)
+            cv2.rectangle(vlm_rgb, (0, 0), (w_v - 1, h_v - 1), color, 3)
+            vlm_image = vlm_rgb
+
     yield (
         vis_rgb,
+        vlm_image,
         last_summary,
         last_json,
         status,
@@ -663,6 +711,7 @@ def analyze_video(
             primary_kind="",
         ),
     )
+
 
 
 
@@ -736,13 +785,17 @@ def build_ui():
 
             with gr.Column(scale=1):
                 video_out = gr.Image(label="🎬 Canlı önizleme")
-                summary = gr.Textbox(label="🇹🇷 Türkçe özet", lines=4, interactive=False)
+                vlm_image_out = gr.Image(label="🧠 Yapay Zekanın İşlediği Kare (336x336)", interactive=False)
                 report = gr.Code(label="📋 JSON", language="json", lines=14)
+
+        with gr.Row():
+            summary = gr.Textbox(label="🇹🇷 Türkçe Aksiyon Odaklı Rapor (Özet)", lines=5, interactive=False)
 
         gr.Markdown(
             "### Mimari\n"
             "YOLO+MOG2 (high-res) → snapshot 336 · sürekli VLM worker · tetikte crop+%20"
         )
+
 
         def _do_load(mock, backend):
             html = load_global_model(mock_vlm=bool(mock), vlm_backend=backend or "smolvlm")
@@ -756,14 +809,25 @@ def build_ui():
                 "Model hazır — Analizi Başlat" if ready else st.get("message", ""),
             )
 
+        _LAST_POLL_HTML = None
+
         def _poll_status():
+            nonlocal _LAST_POLL_HTML
             st = get_model_state()
+            html = model_status_html()
+            if html == _LAST_POLL_HTML:
+                html_update = gr.update()
+            else:
+                _LAST_POLL_HTML = html
+                html_update = html
+
             ready = st["status"] == "ready"
             return (
-                model_status_html(),
+                html_update,
                 int(st["progress"] * 100),
                 gr.update(interactive=ready),
             )
+
 
         load_btn.click(
             fn=_do_load,
@@ -805,8 +869,9 @@ def build_ui():
         run_btn.click(
             fn=analyze_video,
             inputs=[video_in, max_frames, mock_vlm, vlm_backend],
-            outputs=[video_out, summary, report, status, trigger_status],
+            outputs=[video_out, vlm_image_out, summary, report, status, trigger_status],
         )
+
 
 
         # Sayfa açılınca otomatik smolvlm yükle (arka plan)

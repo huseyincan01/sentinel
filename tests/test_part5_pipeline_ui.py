@@ -159,7 +159,7 @@ class TestUIPipeline:
             mock_vlm=True,
         ))
         assert len(res) > 0
-        preview, summary, report_json, status, trigger_html = res[-1]
+        preview, vlm_preview, summary, report_json, status, trigger_html = res[-1]
         assert "Tamamlandı" in status or "✅" in status
         assert isinstance(summary, str)
         assert isinstance(report_json, str)
@@ -176,17 +176,18 @@ class TestUIPipeline:
 
     def test_analyze_video_missing_path(self):
         res = list(analyze_video(None))
-        preview, summary, report, status, trigger_html = res[-1]
+        preview, vlm_preview, summary, report, status, trigger_html = res[-1]
         assert preview is None
         assert "yükleyin" in status.lower() or "⚠️" in status
         assert "VLM" in trigger_html
 
     def test_analyze_video_bad_path(self, tmp_path):
         res = list(analyze_video(str(tmp_path / "yok.mp4")))
-        preview, summary, report, status, trigger_html = res[-1]
+        preview, vlm_preview, summary, report, status, trigger_html = res[-1]
         assert preview is None
         assert "bulunamadı" in status.lower() or "❌" in status
         assert "VLM" in trigger_html
+
 
 
     def test_build_demo_still_works(self, tmp_path):

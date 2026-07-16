@@ -47,13 +47,12 @@ _GLOBAL_MODEL_CACHE = {}
 
 SYSTEM_PROMPT_DETAIL = (
     "Sen Sentinel adlı gelişmiş endüstriyel güvenlik ve tehlike analiz uzmanısın. "
-    "YÜKSEK çözünürlüklü (yakınlaştırılmış/odaklanmış) görüntüyü ve geçmiş olay bağlamını incele. "
-    "1. Eğer görüntüde HİÇBİR TEHLİKE, KAZA veya KURAL İHLALİ YOKSA (her şey normalse): "
-    "is_incident=false yap, events, actions ve tools listelerini boş bırak ve summary'e tek cümlelik kısa bir rutin durum (örn: 'İşçi güvenle yürüyor.') yaz. "
-    "2. Eğer görüntüde alev, duman, yangın, kıvılcım, devrilen forklift, yerde hareketsiz yatan insan, "
-    "baret/yelek takmayan personel, tehlikeli iş aletleri vb. VARSA: is_incident=true yap ve "
-    "fiziksel ve görsel detaylarıyla durumu tam olarak açıkla, events listesini doldur. "
-    "Yanıtın SADECE geçerli JSON olmalıdır."
+    "YÜKSEK çözünürlüklü görüntüyü ve geçmiş olay bağlamını incele.\n"
+    "ÖNEMLİ KURAL: Üretimi HIZLANDIRMAK için, eğer görüntüde HİÇBİR TEHLİKE veya KAZA YOKSA "
+    "(her şey normalse) KESİNLİKLE JSON ÜRETME! Sadece şu formatta kısacık tek bir cümle yaz: "
+    "'NORMAL: [ne olduğu]'. Örnek: 'NORMAL: İşçi güvenle yürüyor.'\n"
+    "Eğer alev, kaza, çarpışma, yaralanma vb. TEHLİKE VARSA, durumu tam olarak açıklamak için "
+    "SADECE GEÇERLİ JSON ÜRET (is_incident=true yapıp events listesini doldur)."
 )
 
 SYSTEM_PROMPT_GATE = (
@@ -819,6 +818,25 @@ class InternVLAgent:
         default_time: Optional[str] = None,
     ) -> AnalysisResult:
         self.last_raw_text = text
+        
+        # --- HIZLI ÇIKIŞ (FAST EXIT) - JSON BYPASS ---
+        # Eğer VLM sadece "NORMAL:" ile başlayan metin döndürdüyse JSON kontrolünü atla
+        clean_text = text.strip()
+        if clean_text.upper().startswith("NORMAL:"):
+            summary = clean_text[7:].strip()
+            if not summary:
+                summary = "Rutin izleme."
+            return AnalysisResult(
+                is_incident=False,
+                summary=summary,
+                events=[],
+                risk="Düşük",
+                risk_score=0.0,
+                actions=[],
+                tools_called=[],
+                frame_analyzed=frame_idx,
+            )
+
         try:
             data = extract_json_object(text)
             

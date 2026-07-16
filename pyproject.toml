@@ -1,0 +1,48 @@
+[project]
+name = "sentinel"
+version = "0.1.0"
+description = "Dinamik Hibrit Görsel Algı ve Karar Destek Ajanı — TEKNOFEST 2026"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=0.34.0",
+    "bitsandbytes>=0.49.2",
+    "einops>=0.8.0",
+    "gradio>=4.44.0",
+    "huggingface-hub>=0.26.0",
+    "lm-format-enforcer>=0.10.0",
+    "numpy>=2.0.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "pydantic>=2.7.0",
+    "pytest>=8.0.0",
+    "pyyaml>=6.0.1",
+    "safetensors>=0.4.0",
+    "scikit-image>=0.22.0",
+    "scipy>=1.11.0",
+    "sentencepiece>=0.2.0",
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "transformers>=4.46.0",
+    "ultralytics>=8.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }

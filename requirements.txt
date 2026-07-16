@@ -1,0 +1,63 @@
+# =============================================================================
+# Sentinel — Python bağımlılıkları (pip / Colab uyumu)
+# =============================================================================
+# Kaynak doğruluk: pyproject.toml + uv.lock  (geliştirmede tercih: uv sync)
+# Bu dosya: pip install -r requirements.txt için bilinçli ayna.
+#
+# Python: >=3.12  (hedef: 3.12)
+# Kurulum (yerel, önerilen):
+#   uv python install 3.12
+#   uv sync
+# Kurulum (pip):
+#   python -m venv .venv
+#   .venv\Scripts\activate          # Windows
+#   pip install -U pip
+#   pip install -r requirements.txt
+#
+# Notlar:
+# - torch GPU tekerleği platforma göre değişir; CUDA uyumsuzsa CPU torch iner.
+#   CUDA için: https://pytorch.org  adresindeki komutu kullanıp torch'u önce kur.
+# - Model ağırlıkları (SmolVLM / InternVL2 / yolov8n) pip paketi DEĞİLDİR;
+#   ilk çalıştırmada HuggingFace / Ultralytics indirir.
+# - .venv klasörünü zip'e / Colab'a koyma.
+# =============================================================================
+
+# --- Çekirdek ---
+numpy>=2.0.0,<3
+pyyaml>=6.0.1
+pydantic>=2.7.0,<3
+Pillow>=10.0.0
+
+# --- Görüntü / tracking ---
+# OpenCV: video, MOG2, resize
+opencv-python>=4.8.0
+# YOLO + BoT-SORT
+ultralytics>=8.3.0
+# SSIM (triage)
+scikit-image>=0.22.0
+# scikit-image bağımlılığı (genelde otomatik gelir)
+scipy>=1.11.0
+
+# --- VLM (SmolVLM geliştirme + InternVL2 hedef) ---
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.46.0
+huggingface_hub>=0.26.0
+accelerate>=0.34.0
+safetensors>=0.4.0
+# Tokenizers / özel modeller
+sentencepiece>=0.2.0
+# JSON şema zorlama (InternVL generate yolu; mock'ta opsiyonel)
+lm-format-enforcer>=0.10.0
+# HF erişim (Colab/login)
+httpx>=0.27.0
+# InternVL / bazı VLM'ler
+einops>=0.8.0
+# 8/4-bit quant (T4 InternVL; 4050 isteğe bağlı) — Windows'ta bazen derleme ister
+bitsandbytes>=0.43.0; platform_system != "Windows"
+
+# --- Arayüz ---
+gradio>=4.44.0
+
+# --- Test / geliştirme ---
+pytest>=8.0.0

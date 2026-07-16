@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Project Large Folders & Datasets
+benchmarkdosyalari/
+outputs/
+models/
+data/
+
+# Large binaries & videos
+*.zip
+*.rar
+*.tar.gz
+*.mp4
+*.avi
+*.pt
+*.onnx
+*.bin
+*.h5
+*.weights
+
+# Local envs / configs
+.env
+.idea/
+.vscode/

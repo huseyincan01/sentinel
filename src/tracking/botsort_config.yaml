@@ -1,0 +1,30 @@
+# BoT-SORT yapılandırması — Sentinel Hybrid Tracker
+# YOLO tespitleri: ReID aktif (varsayılan BoT-SORT davranışı)
+# MOG2 blob'ları: ReID devre dışı (with_reid: false) — sadece Kalman + IoU
+
+tracker_type: botsort
+
+# Takip eşiği ve tampon
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: true
+
+# GMC (Global Motion Compensation)
+gmc_method: sparseOptFlow
+
+# --- ReID ayarları ---
+# MOG2 blob'ları şekilsiz olduğundan ReID anlamsız vektörler üretir.
+# hybrid_tracker.py MOG2 hattında bu config ile with_reid: false kullanır.
+# YOLO hattı için ayrı config veya runtime override ile with_reid: true uygulanır.
+with_reid: false
+proximity_thresh: 0.5
+appearance_thresh: 0.25
+model: auto
+
+# Sentinel-özel notlar (yorum; ultralytics okumaz):
+# - yolo_ prefix: YOLO track ID'leri (ReID aktif)
+# - mog_  prefix: MOG2 track ID'leri (ReID kapalı)
+# - Namespace ayrımı ID çakışmasını önler

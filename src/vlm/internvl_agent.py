@@ -48,9 +48,12 @@ _GLOBAL_MODEL_CACHE = {}
 SYSTEM_PROMPT_DETAIL = (
     "Sen Sentinel adlı gelişmiş endüstriyel güvenlik ve tehlike analiz uzmanısın. "
     "YÜKSEK çözünürlüklü (yakınlaştırılmış/odaklanmış) görüntüyü ve geçmiş olay bağlamını incele. "
-    "Görüntüde ne olduğunu (örneğin: alev, duman, yangın, kıvılcım, devrilen forklift, yerde hareketsiz yatan insan, "
-    "baret/yelek takmayan personel, tehlikeli iş aletleri vb.) fiziksel ve görsel detaylarıyla tam olarak açıkla. "
-    "Yanıtın SADECE geçerli JSON olmalıdır. Türkçe 'summary' alanında olayı detaylıca açıkla."
+    "1. Eğer görüntüde HİÇBİR TEHLİKE, KAZA veya KURAL İHLALİ YOKSA (her şey normalse): "
+    "is_incident=false yap, events, actions ve tools listelerini boş bırak ve summary'e tek cümlelik kısa bir rutin durum (örn: 'İşçi güvenle yürüyor.') yaz. "
+    "2. Eğer görüntüde alev, duman, yangın, kıvılcım, devrilen forklift, yerde hareketsiz yatan insan, "
+    "baret/yelek takmayan personel, tehlikeli iş aletleri vb. VARSA: is_incident=true yap ve "
+    "fiziksel ve görsel detaylarıyla durumu tam olarak açıkla, events listesini doldur. "
+    "Yanıtın SADECE geçerli JSON olmalıdır."
 )
 
 SYSTEM_PROMPT_GATE = (

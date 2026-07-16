@@ -695,20 +695,33 @@ class SentinelPipeline:
                 track_ids=[t.track_id for t in tracks],
                 timestamp=time.monotonic(),
             )
-            if self.save_reports:
-                fr = FrameResult(
-                    frame_idx=frame_idx,
-                    timestamp_s=frame_idx / max(fps, 1e-6),
-                    tracks=tracks,
-                    vlm_called=True,
-                    analysis=analysis,
-                    vlm_input_shape=tuple(image.shape),
-                    detail_high_res_shape=tuple(image.shape),
-                    gate_low_res_size=(self.vlm_size, self.vlm_size),
-                    cropped=cropped,
-                    tool_results=list(self.agent.last_tool_results),
-                )
-                self._save_report(analysis, fr, fps=fps)
+            # Cooldown kontrolü ve is_incident bayrağı (Kara Kutu Mantığı)
+            current_time = time.monotonic()
+            last_save = getattr(self, "_last_incident_save_ts", 0)
+            in_cooldown = (current_time - last_save) < 15.0  # 15 saniye cooldown
+
+            if getattr(analysis, "is_incident", False):
+                if self.save_reports and not in_cooldown:
+                    fr = FrameResult(
+                        frame_idx=frame_idx,
+                        timestamp_s=frame_idx / max(fps, 1e-6),
+                        tracks=tracks,
+                        vlm_called=True,
+                        analysis=analysis,
+                        vlm_input_shape=tuple(image.shape),
+                        detail_high_res_shape=tuple(image.shape),
+                        gate_low_res_size=(self.vlm_size, self.vlm_size),
+                        cropped=cropped,
+                        tool_results=list(self.agent.last_tool_results),
+                    )
+                    self._save_report(analysis, fr, fps=fps)
+                    self._last_incident_save_ts = current_time
+                    logger.info("🚨 YENİ VAKA RAPORU OLUŞTURULDU (JSON diske kaydedildi)!")
+                elif in_cooldown:
+                    logger.info("⚠️ Vaka devam ediyor, ancak cooldown süresinde olduğu için yeni JSON yazılmadı.")
+            else:
+                # Rutin durum - sadece hafızaya eklenir, JSON diske yazılmaz
+                pass
 
             logger.info(
                 "VLM #%s frame=%s cropped=%s risk=%s size=%s",
@@ -776,9 +789,10 @@ class SentinelPipeline:
             track_ids=[t.track_id for t in tracks],
             timestamp=ts,
         )
-        if self.save_reports:
-            path = self._save_report(analysis, result, fps=fps)
-            result.report_path = str(path)
+        if getattr(analysis, "is_incident", False):
+            if self.save_reports:
+                path = self._save_report(analysis, result, fps=fps)
+                result.report_path = str(path)
 
     def process_frame(
         self,

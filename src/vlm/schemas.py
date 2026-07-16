@@ -63,6 +63,7 @@ class AnalysisResult(BaseModel):
 
     Örnek:
     {
+      "is_incident": true,
       "summary": "...",
       "events": [...],
       "risk": "Yüksek",
@@ -74,9 +75,13 @@ class AnalysisResult(BaseModel):
     }
     """
 
-    summary: str = Field(..., description="Türkçe özet")
+    is_incident: bool = Field(
+        False, 
+        description="Görüntüde kaza, tehlike veya kural ihlali VARSA true; her şey normal/rutin ise false."
+    )
+    summary: str = Field(..., description="Türkçe özet (tehlike yoksa çok kısa)")
     events: List[EventItem] = Field(default_factory=list)
-    risk: RiskLiteral = Field(..., description="Genel risk seviyesi")
+    risk: RiskLiteral = Field(..., description="Genel risk seviyesi (Normal durumlar için Düşük)")
     risk_score: float = Field(..., ge=0.0, le=1.0)
     actions: List[str] = Field(default_factory=list)
     tools_called: List[str] = Field(default_factory=list)

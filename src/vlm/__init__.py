@@ -10,6 +10,7 @@ from src.vlm.cuda_compat import (
     diagnose_cuda,
     humanize_cuda_error,
     is_cuda_kernel_mismatch,
+    suggest_cuda_fix_actions,
     verify_cuda_matmul,
 )
 from src.vlm.internvl_agent import (
@@ -62,5 +63,6 @@ __all__ = [
     "diagnose_cuda",
     "humanize_cuda_error",
     "is_cuda_kernel_mismatch",
+    "suggest_cuda_fix_actions",
     "verify_cuda_matmul",
 ]

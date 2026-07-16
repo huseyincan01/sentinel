@@ -8,27 +8,72 @@ Sık hata:
 AcceleratorError: CUDA error: no kernel image is available for execution on the device
 ```
 
-Bu **VRAM OOM değil**. Anlamı: yüklü PyTorch tekerleği, oturumdaki GPU mimarisi
-için CUDA kernel içermiyor (ör. `uv`/pip ile `cu121` torch Kaggle torch’unu ezdi).
+Bu **VRAM OOM değil**. Anlamı: yüklü PyTorch tekerleği, oturumdaki GPU’nun
+**compute capability**’si için CUDA kernel içermiyor.
 
 ---
 
-## Altın kural: torch’a dokunma
+## Senin log’un ne diyor? (P100 + torch 2.10)
 
-| Yap | Yapma |
-|-----|--------|
-| Kaggle’ın önceden yüklü `torch`’unu kullan | `pip install torch` / `uv sync` ile torch ezmek |
-| `requirements-kaggle.txt` kur | Ana `requirements.txt` (içinde torch var) kör kurmak |
-| Kernel **Restart** sonrası test | Restart etmeden üst üste torch kurmak |
+Örnek teşhis:
 
-Proje `pyproject.toml` torch’u **pytorch-cu121** indeksine bağlar — bu **yerel/uv** içindir.
-Kaggle notebook’unda `uv sync` **önermeyiz**.
+| Alan | Değer | Yorum |
+|------|--------|--------|
+| GPU | Tesla **P100** | Pascal, **sm_60** |
+| torch | 2.10.0+**cu128** | Kaggle güncel image |
+| arch_list | sm_**70**, 75, 80, … | **sm_60 yok** |
+
+→ P100, bu torch ile **hiç çalışmaz**. Sentinel hatası değil; Kaggle torch ↔ eski GPU.
+
+### Çözüm A — Önerilen (en kolay)
+
+1. Notebook **Settings → Accelerator → GPU T4** (P100 değil).  
+2. **Restart session**.  
+3. Aşağıda Hücre 1 matmul → yeşil olmalı.  
+4. `requirements-kaggle.txt` kur; torch’a dokunma.
+
+T4 = sm_75 → güncel torch arch listesinde var.
+
+### Çözüm B — P100’de kalmak zorundaysan
+
+Kaggle’ın torch’unu **bilerek eski sürüme** çek (sm_60 içeren tekerlek):
+
+```python
+# Hücre B1 — P100 için torch düşür
+!pip uninstall -y torch torchvision torchaudio
+!pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+```
+
+**Runtime → Restart session**, sonra Hücre 1 matmul.
+
+```python
+# Hâlâ kırmızıysa cu118 dene:
+!pip uninstall -y torch torchvision torchaudio
+!pip install -q torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu118
+# Restart
+```
+
+> Not: `pip install torch` (sürüm belirtmeden) veya `cu128` en yeni tekerlek
+> P100’ü yine kırar. **Sürümlü** kur.
 
 ---
 
-## Hücre 0 — GPU oturumu açık mı?
+## Torch kuralı (güncellenmiş)
 
-Notebook ayarı: **Accelerator → GPU** (T4 / P100 / L4).
+| Durum | Ne yap |
+|--------|--------|
+| Matmul **yeşil** | torch’a **dokunma**; sadece `requirements-kaggle.txt` |
+| Matmul kırmızı + **P100/sm_60** | **T4’e geç** veya torch **2.5.x**’e düş |
+| Matmul kırmızı + T4 | Bozuk kurulum → cu121 torch yeniden kur + Restart |
+| `uv sync` / ana `requirements.txt` | Kaggle’da **kullanma** (torch ezebilir) |
+
+Proje `pyproject.toml` cu121 — **yerel/uv** içindir.
+
+---
+
+## Hücre 0 — GPU oturumu
+
+Notebook: **Accelerator → GPU** — mümkünse **T4**.
 
 ```python
 !nvidia-smi
@@ -36,7 +81,7 @@ Notebook ayarı: **Accelerator → GPU** (T4 / P100 / L4).
 
 ---
 
-## Hücre 1 — Torch teşhisi (kurulumdan ÖNCE)
+## Hücre 1 — Torch teşhisi
 
 ```python
 import torch
@@ -53,112 +98,69 @@ if torch.cuda.is_available():
     print("matmul OK:", tuple(y.shape))
 ```
 
-- `matmul OK` → torch sağlıklı; **torch’u bir daha kurma**.
-- `no kernel image` → Hücre 3’e (uyumlu torch) geç; sonra **Restart**.
-
-Proje kodu ile:
+- `capability (6, 0)` + arch’ta `sm_60` yok → **Çözüm A veya B**  
+- `matmul OK` → torch’u bir daha kurma  
 
 ```python
-from src.vlm.cuda_compat import diagnose_cuda, verify_cuda_matmul, humanize_cuda_error
+from src.vlm.cuda_compat import diagnose_cuda, verify_cuda_matmul, suggest_cuda_fix_actions
 print(diagnose_cuda())
 print(verify_cuda_matmul())
+print(suggest_cuda_fix_actions())
 ```
 
 ---
 
-## Hücre 2 — Güvenli paket kurulumu (torch YOK)
-
-Repo kökünde:
+## Hücre 2 — Güvenli paketler (torch YOK)
 
 ```python
-# Kaggle: Add data / git clone sonrası repo köküne cd
 import os
-os.chdir("/kaggle/working/Sentinel")  # kendi yolunu yaz
+os.chdir("/kaggle/working/Sentinel")  # kendi yolun
 
 !pip install -q -r requirements-kaggle.txt
 ```
 
 `requirements-kaggle.txt` bilerek **torch/torchvision içermez**.
 
-Alternatif (tek satır, torch’suz paketler):
-
-```bash
-pip install -q transformers accelerate safetensors sentencepiece einops \
-  ultralytics opencv-python-headless scikit-image scipy pydantic pyyaml \
-  gradio pillow lm-format-enforcer huggingface_hub httpx
-```
-
 ---
 
-## Hücre 3 — Sadece matmul patlıyorsa: uyumlu torch (opsiyonel)
+## Hücre 3 — T4’te bozulmuş torch (nadir)
 
-**Sadece** Hücre 1 matmul başarısızsa. Sonra **Runtime → Restart session**.
+Matmul kırmızı **ve** GPU T4/L4 ise:
 
 ```python
-# DİKKAT: yalnızca kernel mismatch doğrulandıysa
 !pip uninstall -y torch torchvision torchaudio
 !pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# Hâlâ olmazsa cu118 dene:
-# !pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# Restart → Hücre 1
 ```
-
-Restart sonrası Hücre 1’i tekrarla. Yeşil olmadan model indirme.
 
 ---
 
-## Hücre 4 — Hızlı doğrulama (mock → gerçek)
+## Hücre 4 — Mock → gerçek VLM
 
 ```python
-# 1) Mock: CUDA olmadan pipeline
 from src.pipeline import build_demo_pipeline
 pipe = build_demo_pipeline(mock_vlm=True, vlm_size=336, vlm_period_s=2.0)
 print("mock OK")
 
-# 2) CUDA smoke (gerçek VLM öncesi)
 from src.vlm.cuda_compat import ensure_cuda_kernels_or_raise
 ensure_cuda_kernels_or_raise()
 print("CUDA smoke OK")
-
-# 3) UI
-# !python -m src.ui.app --share   # CLI destekliyorsa
-# veya Gradio notebook içi launch
 ```
 
-UI checklist:
+UI: önce **Mock VLM**, sonra **smolvlm**.
 
-1. Önce **Mock VLM açık** → analiz akıyor mu?
-2. Mock kapalı + **smolvlm** → model yükleme çubuğu “HAZIR” olmalı.
-3. CUDA hatası varsa kartta Türkçe rehber görünür (`notebooks/kaggle_setup.md` referansı).
+| GPU | Backend |
+|-----|---------|
+| T4 16GB | `smolvlm` (varsayılan) veya `internvl2` |
+| P100 + eski torch | `smolvlm` FP16 |
 
----
-
-## Hücre 5 — Önerilen backend
-
-| GPU (tipik) | Backend | Not |
-|-------------|---------|-----|
-| T4 16GB | `smolvlm` (varsayılan) | FP16; quant kapalı |
-| T4 16GB | `internvl2` | Sunum hedefi; VRAM’e dikkat |
-| P100 | `smolvlm` | Eski mimari; torch arch list kontrol |
-
-Quant (4/8-bit) Kaggle’da bitsandbytes ile bazen bozulur; Sentinel varsayılanı **FP16**.
+Quant (4/8-bit) Kaggle’da bazen bozulur; Sentinel varsayılanı **FP16**.
 
 ---
 
-## Ne bozar?
+## Kod
 
-1. `uv sync` / `pip install torch==...` ile Kaggle torch’unu ezmek  
-2. Yerel Windows tekerleği veya yanlış CUDA major  
-3. Restart etmeden yarım kalmış torch kurulumları  
-4. Warmup hatasını yok sayıp “ready” sanmak — artık UI **CUDA mismatch’te error** gösterir  
+- `src/vlm/cuda_compat.py` — teşhis, P100’e özel Türkçe adımlar  
+- Warmup CUDA mismatch’te “ready” demez  
 
----
-
-## Kod tarafı (bu repoda)
-
-- `src/vlm/cuda_compat.py` — teşhis + Türkçe mesaj  
-- Yükleme / `generate` / warmup → `CudaKernelMismatchError`  
-- UI model kartı ve VLM hata satırı → okunabilir rehber  
-
-Ham hata yerine şunu görmelisin:
-
-> CUDA mimari uyumsuzluğu: bu PyTorch tekerleği… torch’u yeniden KURMA…
+Ham `AcceleratorError` yerine UI’da **T4’e geç / torch 2.5.1** rehberi görünür.

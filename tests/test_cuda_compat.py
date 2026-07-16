@@ -11,6 +11,7 @@ from src.vlm.cuda_compat import (
     humanize_cuda_error,
     is_cuda_kernel_mismatch,
     raise_if_cuda_kernel_mismatch,
+    suggest_cuda_fix_actions,
 )
 
 
@@ -56,8 +57,28 @@ class TestHumanizeAndRaise:
         raw = "CUDA error: no kernel image is available for execution on the device"
         text = humanize_cuda_error(raw)
         assert "CUDA mimari uyumsuzluğu" in text
-        assert "torch" in text.lower()
-        assert "kaggle" in text.lower() or "Kaggle" in text
+        assert "Ne yapmalı" in text
+
+    def test_p100_suggests_t4_or_old_torch(self):
+        diag = {
+            "device_name": "Tesla P100-PCIE-16GB",
+            "capability": "sm_60",
+            "torch_version": "2.10.0+cu128",
+            "torch_cuda_built": "12.8",
+            "arch_list": ["sm_70", "sm_75", "sm_80", "sm_86", "sm_90"],
+            "capability_supported": False,
+            "cuda_available": True,
+        }
+        actions = suggest_cuda_fix_actions(diag)
+        blob = " ".join(actions).lower()
+        assert "t4" in blob
+        assert "2.5" in blob or "p100" in blob
+        msg = format_cuda_kernel_mismatch_message(
+            original="no kernel image",
+            diagnosis=diag,
+        )
+        assert "P100" in msg or "T4" in msg
+        assert "sm_60" in msg or "sm_70" in msg
 
     def test_humanize_passthrough_other(self):
         assert humanize_cuda_error("basit hata") == "basit hata"

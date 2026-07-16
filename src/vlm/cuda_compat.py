@@ -144,6 +144,80 @@ def verify_cuda_matmul() -> Dict[str, Any]:
         return out
 
 
+def _capability_major_minor(cap: Optional[str]) -> Optional[tuple]:
+    """'sm_60' / 'sm_75' → (6, 0) / (7, 5)."""
+    if not cap:
+        return None
+    m = re.search(r"sm_(\d+)", str(cap))
+    if not m:
+        return None
+    num = m.group(1)
+    if len(num) == 2:
+        return int(num[0]), int(num[1])
+    if len(num) >= 3:
+        # sm_100, sm_120
+        return int(num[:-1]), int(num[-1])
+    return int(num), 0
+
+
+def suggest_cuda_fix_actions(diagnosis: Optional[Dict[str, Any]] = None) -> list:
+    """
+    Teşhise göre somut adımlar (sıralı öncelik).
+
+    Kaggle 2025–2026: varsayılan torch (ör. 2.10+cu128) sıkça sm_70+;
+    Tesla P100 (sm_60) bu tekerleklerde YOK → 'torch'a dokunma' yanlış tavsiye.
+    """
+    diag = diagnosis if diagnosis is not None else diagnose_cuda()
+    name = (diag.get("device_name") or "").lower()
+    cap = diag.get("capability") or ""
+    mm = _capability_major_minor(cap)
+    supported = diag.get("capability_supported")
+    actions: list = []
+
+    # P100 / Pascal (sm_60, sm_61): modern Kaggle torch desteklemiyor
+    is_pascal = bool(mm and mm[0] == 6) or "p100" in name or "pascal" in name
+    if is_pascal or (supported is False and mm and (mm[0] < 7)):
+        actions.append(
+            "ÖNERİLEN: Kaggle notebook Settings → Accelerator = GPU T4 "
+            "(sm_75; güncel torch ile uyumlu). P100 (sm_60) yeni PyTorch tekerleklerinde yok."
+        )
+        actions.append(
+            "P100’de kalacaksan: Runtime Restart sonrası ESKİ torch kur "
+            "(sm_60 içeren, ör. 2.5.x+cu121): "
+            "pip uninstall -y torch torchvision torchaudio; "
+            "pip install torch==2.5.1 torchvision==0.20.1 "
+            "--index-url https://download.pytorch.org/whl/cu121 "
+            "→ tekrar Restart → matmul smoke."
+        )
+        actions.append(
+            "Kaggle’ın varsayılan torch 2.10+cu128 P100’de ÇALIŞMAZ "
+            "(arch_list sm_70+). 'Torch kurma' kuralı yalnızca matmul yeşilken geçerlidir."
+        )
+        return actions
+
+    if supported is False:
+        actions.append(
+            "GPU capability, yüklü torch arch_list’te yok. "
+            "T4/L4 oturumu dene veya notebooks/kaggle_setup.md ‘uyumlu torch’ hücresi."
+        )
+        actions.append(
+            "pip uninstall -y torch torchvision torchaudio; "
+            "pip install torch torchvision --index-url "
+            "https://download.pytorch.org/whl/cu121 → Kernel Restart."
+        )
+        return actions
+
+    # capability listede ama yine kernel hatası (nadir / bozulmuş kurulum)
+    actions.append(
+        "Kernel Restart. Matmul yeşilse torch’u yeniden KURMA; "
+        "requirements-kaggle.txt kullan (torch yok)."
+    )
+    actions.append(
+        "Matmul hâlâ kırmızıysa: notebooks/kaggle_setup.md Hücre 3 (uyumlu torch)."
+    )
+    return actions
+
+
 def format_cuda_kernel_mismatch_message(
     original: Union[BaseException, str, None] = None,
     diagnosis: Optional[Dict[str, Any]] = None,
@@ -172,12 +246,11 @@ def format_cuda_kernel_mismatch_message(
         lines.append(
             "Uyarı: GPU compute capability, yüklü torch arch listesinde görünmüyor."
         )
-    lines.append(
-        "Ne yapmalı (Kaggle): (1) Kernel Restart. "
-        "(2) torch/torchvision'ı yeniden KURMA — Kaggle'ın torch'unu kullan. "
-        "(3) notebooks/kaggle_setup.md hücresini çalıştır. "
-        "(4) Minimal matmul hâlâ patlıyorsa oradaki 'uyumlu torch' hücresini dene."
-    )
+    actions = suggest_cuda_fix_actions(diag)
+    lines.append("Ne yapmalı:")
+    for i, step in enumerate(actions, 1):
+        lines.append(f"  ({i}) {step}")
+    lines.append("Ayrıntı: notebooks/kaggle_setup.md (P100 / T4 bölümü).")
     if original is not None:
         raw = str(original)
         if len(raw) > 280:

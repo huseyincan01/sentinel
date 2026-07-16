@@ -54,6 +54,7 @@ Tools, schemas, memory, agent. `test_part3_vlm.py`.
 | 2026-07-15 | Gate+Detail iki şema | **Pipeline tek şema:** AnalysisResult @336 |
 | 2026-07-15 | Backend | `smolvlm` \| `internvl2` \| `mock` |
 | 2026-07-16 | Kaggle CUDA `no kernel image` | `src/vlm/cuda_compat.py`: teşhis + `CudaKernelMismatchError` + Türkçe rehber; generate/load/warmup guard; `tests/test_cuda_compat.py` |
+| 2026-07-16 | P100 + torch 2.10 | Kaggle varsayılan torch arch_list sm_70+; P100 sm_60 yok. Rehber: **T4’e geç** veya torch **2.5.1+cu121**; “torch kurma” yalnızca matmul yeşilken. |
 
 ---
 

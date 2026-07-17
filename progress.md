@@ -117,6 +117,15 @@ UI, README, `test_part5_pipeline_ui.py`.
 
 ✅ PART 8 TAMAMLANDI
 
+## PART 9 — Gradio Canlı Önizleme Akışı (2026-07-18)
+
+- Gradio'ya 30 FPS'te görüntü yığmak yerine, kaynak videodan saniyede bir güncel kare yayınlanır.
+- Canlı önizlemeye kare indeksi eklendi; `VLM Durumu` artık geçerli JSON içerir.
+- VLM worker bağımsız 336×336 / ~2 saniye mimarisini korur.
+- Test: `python -m pytest -q` → **11 passed**.
+
+✅ PART 9 TAMAMLANDI
+
 ## 🤖 HANDOVER (sonraki AI)
 
 **Önce oku:** `AGENTS.md` §2b — *Neden eski mimari terk edildi?* (Gate→Detail hataları, semptomlar, yasak listesi).

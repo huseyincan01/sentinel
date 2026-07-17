@@ -4,6 +4,7 @@ Sentinel Gradio arayüzü (Basitleştirilmiş)
 
 from __future__ import annotations
 import logging
+import json
 import sys
 import threading
 import time
@@ -22,6 +23,17 @@ logger = logging.getLogger("sentinel.ui")
 _MODEL_LOCK = threading.Lock()
 _PIPELINE = None
 _LOADING_STATUS = "Bekleniyor..."
+UI_SAMPLE_PERIOD_S = 1.0
+
+
+def frame_sample_stride(fps: float, period_s: float = UI_SAMPLE_PERIOD_S) -> int:
+    """Gradio'ya gönderilecek kare sayısını kontrollü tutar.
+
+    Tarayıcıya her 30 FPS görüntüyü göndermek, generator kuyruğunun büyüyüp
+    kullanıcının ilk kareyi görmesine yol açabiliyor. VLM periyodundan bağımsız
+    olarak UI için saniyede bir güncel kaynak karesi yeterlidir.
+    """
+    return max(1, round(max(fps, 1.0) * period_s))
 
 def load_pipeline(mock: bool, backend: str):
     global _PIPELINE, _LOADING_STATUS
@@ -48,6 +60,7 @@ def process_video_generator(video_path: str):
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_stride = frame_sample_stride(fps)
     _PIPELINE.start_vlm_worker()
     
     frame_idx = 0
@@ -70,22 +83,27 @@ def process_video_generator(video_path: str):
                 cv2.putText(out, t.track_id, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
             # Bilgi yazdırma
-            cv2.putText(out, f"VLM: {_PIPELINE._vlm_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-            cv2.putText(out, f"Risk: {_PIPELINE._vlm_last_risk}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            cv2.putText(out, f"Kare: {frame_idx}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+            cv2.putText(out, f"VLM: {_PIPELINE._vlm_status}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+            cv2.putText(out, f"Risk: {_PIPELINE._vlm_last_risk}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
             summary = _PIPELINE.get_last_summary()
             analysis_json = "{}"
             if _PIPELINE._vlm_call_count:
-                analysis_json = str({
+                analysis_json = json.dumps({
+                    "frame_idx": frame_idx,
                     "risk": _PIPELINE._vlm_last_risk,
                     "risk_score": _PIPELINE._vlm_last_score,
                     "vlm_calls": _PIPELINE._vlm_call_count,
-                })
+                }, ensure_ascii=False)
             
-            # 30 FPS hızında oynatma efekti
-            time.sleep(1.0 / fps)
             yield out, summary, analysis_json
-            frame_idx += 1
+            # Kaynak videoda yaklaşık bir saniye ileri atla. Bu, Gradio
+            # generator'unun görüntü kuyruğunu şişirmeden net güncelleme yapar.
+            next_frame_idx = frame_idx + frame_stride
+            cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_idx)
+            frame_idx = next_frame_idx
+            time.sleep(UI_SAMPLE_PERIOD_S)
             
     finally:
         cap.release()
@@ -106,7 +124,7 @@ def build_app():
             start_btn = gr.Button("Analizi Başlat")
             
         with gr.Row():
-            img_out = gr.Image(label="Canlı Analiz")
+            img_out = gr.Image(label="Canlı Analiz", type="numpy", format="png")
             
         with gr.Row():
             summary_out = gr.Textbox(label="VLM Özeti", lines=3)

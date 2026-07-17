@@ -3,6 +3,7 @@ import numpy as np
 from src.pipeline.main_pipeline import build_demo_pipeline
 from src.vlm.internvl_agent import InternVLAgent, make_mock_generator
 from src.vlm.tools import ToolRegistry
+from src.ui.app import frame_sample_stride
 
 
 def test_pipeline_honors_requested_mock_backend():
@@ -33,6 +34,11 @@ def test_prepare_for_streaming_loads_agent_and_tracker_before_video():
     pipeline = SentinelPipeline(agent=FakeAgent(), tracker=FakeTracker())
     pipeline.prepare_for_streaming()
     assert pipeline.agent.is_loaded
+
+
+def test_ui_samples_one_frame_per_second_instead_of_queueing_every_frame():
+    assert frame_sample_stride(30.0) == 30
+    assert frame_sample_stride(0.0) == 1
 
 
 def test_agent_parses_json_and_executes_declared_tools(tmp_path):

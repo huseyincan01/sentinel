@@ -12,14 +12,15 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Sequence
+from typing import Any, Callable, Dict, List, Optional, Tuple, Sequence, Union
 
 import cv2
 import numpy as np
 
 from src.decision.triage_engine import TriageDecision, TriageEngine
 from src.tracking.hybrid_tracker import FrameTracks, HybridTracker, TrackedObject
-from src.vlm.internvl_agent import InternVLAgent, make_mock_generator
+from src.vlm.internvl_agent import InternVLAgent
+from src.vlm.factory import create_vlm_agent
 from src.vlm.schemas import AnalysisResult
 from src.vlm.tools import ToolRegistry, ToolResult
 
@@ -95,20 +96,25 @@ def build_demo_pipeline(
     roi_polygon: Optional[Sequence[Tuple[float, float]]] = None,
     mock_vlm: bool = True,
     vlm_backend: str = "mock",
+    tracker_device: str = "cpu",
     **kwargs
 ) -> SentinelPipeline:
     """Tek noktadan demo pipeline oluşturma (Geriye uyumlu factory)"""
     tools = ToolRegistry(report_dir=report_dir)
-    agent = InternVLAgent(
-        tools=tools,
-        generator_fn=make_mock_generator() if mock_vlm or vlm_backend=="mock" else None,
-        auto_execute_tools=True,
-    )
+    backend = "mock" if mock_vlm else vlm_backend
     triage = TriageEngine(roi_polygon=roi_polygon)
     
     import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    tracker = HybridTracker(device=device, use_ultralytics_botsort=False)
+    vlm_device = "cuda" if torch.cuda.is_available() else "cpu"
+    agent = create_vlm_agent(
+        backend=backend,
+        tools=tools,
+        device=vlm_device,
+        auto_load=False,
+    )
+    # VLM ana GPU bütçesini kullanır. YOLO CPU'da high-res çalışarak aynı T4
+    # üzerinde inference yarışını ve ilk karedeki CUDA beklemesini önler.
+    tracker = HybridTracker(device=tracker_device, use_ultralytics_botsort=False)
     
     return SentinelPipeline(
         tracker=tracker,
@@ -173,6 +179,18 @@ class SentinelPipeline:
         self._vlm_worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._vlm_worker_thread.start()
 
+    def prepare_for_streaming(self) -> None:
+        """Pahalı lazy-load işlemlerini video akışından önce tamamla.
+
+        Gradio'da ilk `yield`, bu işlemlerden sonra gelir. Bu yüzden VLM ve YOLO
+        başlangıcını "Modeli Yükle" adımına taşırız; worker burada başlatılmaz.
+        """
+        if self.agent and not self.agent.is_loaded:
+            self.agent.load()
+        if self.tracker is not None:
+            # Yalnızca model nesnesini hazırlar; gerçek videodan önce GPU/CPU yükü yoktur.
+            _ = self.tracker.yolo
+
     def stop_vlm_worker(self) -> None:
         self._vlm_worker_stop.set()
         if self._vlm_worker_thread and self._vlm_worker_thread.is_alive():
@@ -223,7 +241,8 @@ class SentinelPipeline:
                 if self.report_dir:
                     rpath = self.report_dir / f"vlm_report_{snap['frame_idx']:06d}.txt"
                     with open(rpath, "w", encoding="utf-8") as f:
-                        f.write(str(self._vlm_last_score))
+                        import json
+                        json.dump(analysis.model_dump_report(), f, ensure_ascii=False, indent=2)
                 
             except Exception as e:
                 logger.error(f"VLM Hatası: {e}")
@@ -286,6 +305,8 @@ class SentinelPipeline:
             # Senkron işleme (Testler için)
             if self.agent and (time.monotonic() >= self._next_vlm_time):
                 try:
+                    if not self.agent.is_loaded:
+                        self.agent.load()
                     analysis = self.agent.analyze_detail(
                         frame=vlm_img_336,
                         frame_idx=frame_idx,
@@ -296,6 +317,7 @@ class SentinelPipeline:
                     )
                     self._vlm_call_count += 1
                     self._last_vlm_summary = analysis.summary
+                    self._vlm_last_score = analysis.risk_score
                     self._vlm_last_risk = analysis.risk or ""
                     self._last_cropped = cropped
                     self._next_vlm_time = time.monotonic() + self.vlm_period_s

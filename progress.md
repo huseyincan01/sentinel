@@ -98,6 +98,25 @@ UI, README, `test_part5_pipeline_ui.py`.
 
 ---
 
+## PART 7 — Runtime Onarımı (2026-07-18)
+
+- Pipeline artık arayüzden seçilen VLM backend'ini (`mock`, `smolvlm`, `internvl2`) fabrika üzerinden gerçekten kullanır.
+- VLM yanıtı tekrar şartnamedeki `AnalysisResult` JSON şemasına dönüştürülür; bildirilen mock araçlar simüle edilerek kayda alınır.
+- Mock VLM, gerçek çalışma yolunda geçerli JSON üretir; arayüz de risk ve VLM çağrı durumunu gösterir.
+- Test: `python -m pytest -q` → **9 passed**.
+
+✅ PART 7 TAMAMLANDI
+
+## PART 8 — T4 İlk-Kare Gecikmesi (2026-07-18)
+
+- VLM ve YOLO lazy-load işlemleri video generator'ından çıkarılıp UI'daki **Modeli Yükle** adımına taşındı.
+- İlk video karesi artık model dosyası açma/yükleme yüzünden beklemez; VLM worker yalnızca güncel 336×336 snapshot'ı işler.
+- JSON üretim sınırı 96 token (en fazla 128) ile T4'te gereksiz uzun üretim engellendi.
+- YOLO varsayılanı CPU'ya alındı; yüksek çözünürlüklü tracker VLM'nin T4 GPU bütçesiyle yarışmaz.
+- Test: `python -m pytest -q` → **10 passed**.
+
+✅ PART 8 TAMAMLANDI
+
 ## 🤖 HANDOVER (sonraki AI)
 
 **Önce oku:** `AGENTS.md` §2b — *Neden eski mimari terk edildi?* (Gate→Detail hataları, semptomlar, yasak listesi).

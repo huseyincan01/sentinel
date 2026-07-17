@@ -7,7 +7,6 @@ Sentinel pipeline — Tek Hat VLM Mimarisi (Basitleştirilmiş Sürüm)
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -145,7 +144,7 @@ class SentinelPipeline:
         self._frame_idx = 0
         self._vlm_call_count = 0
         self._last_vlm_summary = "Henüz VLM çalışmadı."
-        self._last_vlm_json = "{}"
+        self._vlm_last_score = 0.0
         self._vlm_last_risk = ""
         self._vlm_status = "idle"
         self._last_vlm_error = ""
@@ -214,7 +213,7 @@ class SentinelPipeline:
                 )
                 self._vlm_call_count += 1
                 self._last_vlm_summary = analysis.summary
-                self._last_vlm_json = json.dumps(analysis.model_dump(), ensure_ascii=False, indent=2)
+                self._vlm_last_score = analysis.risk_score
                 self._vlm_last_risk = analysis.risk or ""
                 self._last_cropped = snap["cropped"]
                 
@@ -222,9 +221,9 @@ class SentinelPipeline:
                 self._vlm_status = "danger_found" if risk_lower in ("yüksek", "kritik", "high", "critical") else "no_danger"
 
                 if self.report_dir:
-                    rpath = self.report_dir / f"vlm_report_{snap['frame_idx']:06d}.json"
+                    rpath = self.report_dir / f"vlm_report_{snap['frame_idx']:06d}.txt"
                     with open(rpath, "w", encoding="utf-8") as f:
-                        f.write(self._last_vlm_json)
+                        f.write(str(self._vlm_last_score))
                 
             except Exception as e:
                 logger.error(f"VLM Hatası: {e}")
@@ -350,8 +349,5 @@ class SentinelPipeline:
     def get_last_summary(self) -> str:
         return self._last_vlm_summary
 
-    def get_last_report_json(self) -> Dict[str, Any]:
-        try:
-            return json.loads(self._last_vlm_json)
-        except:
-            return {}
+    def get_last_score(self) -> float:
+        return self._vlm_last_score

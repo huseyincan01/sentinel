@@ -3,7 +3,6 @@ Sentinel Gradio arayüzü (Basitleştirilmiş)
 """
 
 from __future__ import annotations
-import json
 import logging
 import sys
 import threading
@@ -73,11 +72,11 @@ def process_video_generator(video_path: str):
             cv2.putText(out, f"Risk: {_PIPELINE._vlm_last_risk}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
             summary = _PIPELINE.get_last_summary()
-            js = _PIPELINE._last_vlm_json
+            score_text = str(getattr(_PIPELINE, "_vlm_last_score", 0.0))
             
             # 30 FPS hızında oynatma efekti
             time.sleep(1.0 / fps)
-            yield out, summary, js
+            yield out, summary, score_text
             frame_idx += 1
             
     finally:
@@ -103,10 +102,10 @@ def build_app():
             
         with gr.Row():
             summary_out = gr.Textbox(label="VLM Özeti", lines=3)
-            json_out = gr.Code(label="VLM JSON Çıktısı", language="json")
+            score_out = gr.Textbox(label="Ham Risk Skoru", lines=1)
 
         load_btn.click(fn=load_pipeline, inputs=[mock_cb, backend_dd], outputs=status_txt)
-        start_btn.click(fn=process_video_generator, inputs=[video_input], outputs=[img_out, summary_out, json_out])
+        start_btn.click(fn=process_video_generator, inputs=[video_input], outputs=[img_out, summary_out, score_out])
 
     return demo
 

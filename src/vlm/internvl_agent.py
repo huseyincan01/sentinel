@@ -1,9 +1,10 @@
 """
-VLM ajanı (SmolVLM / InternVL2 / mock) - Basitleştirilmiş
+VLM ajanı (SmolVLM / InternVL2 / mock) - Ultra Hızlı Skor Sürümü
 """
 
 import json
 import logging
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
@@ -22,21 +23,20 @@ DEFAULT_SMOLVLM_ID = "HuggingFaceTB/SmolVLM-Instruct"
 _GLOBAL_MODEL_CACHE = {}
 
 SYSTEM_PROMPT = (
-    "Sen Sentinel adlı gelişmiş endüstriyel güvenlik ve tehlike analiz uzmanısın. "
-    "Görüntüde ne olduğunu (alev, duman, yangın, devrilen forklift, yerde hareketsiz yatan insan vb.) "
-    "açıkla. Yanıtın SADECE geçerli JSON olmalıdır."
+    "Görüntüyü analiz et ve tehlike durumuna göre SADECE 0.0 ile 1.0 arasında bir risk skoru yaz. "
+    "0.0 tamamen güvenli, 1.0 kritik kaza demektir. "
+    "Başka HİÇBİR açıklama, kelime, harf veya JSON formatı KULLANMA. Sadece sayıyı yaz."
 )
 
-def extract_json_object(text: str) -> Dict[str, Any]:
-    text = text.strip()
-    try: return json.loads(text)
-    except: pass
-    
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        return json.loads(text[start : end + 1])
-    raise ValueError("JSON bulunamadı")
+def extract_float_score(text: str) -> float:
+    # Tüm metni temizleyip içindeki ilk ondalıklı sayıyı bulur
+    matches = re.findall(r"0\.\d+|1\.0|0|1", text.strip())
+    if matches:
+        try:
+            return float(matches[0])
+        except ValueError:
+            pass
+    return 0.1 # Fallback
 
 class InternVLAgent:
     def __init__(
@@ -106,11 +106,10 @@ class InternVLAgent:
         return image.convert("RGB") if hasattr(image, "convert") else None
 
     def analyze_detail(self, frame: Any = None, frame_idx: int = 0, fps: float = 30.0, tracks: Optional[Sequence[Any]] = None, trigger_info: str = "", execute_tools: bool = True, **kwargs) -> AnalysisResult:
-        track_str = ", ".join(str(getattr(t, "track_id", t)) for t in (tracks or []))
-        prompt = f"{SYSTEM_PROMPT}\nZaman: {frame_idx/fps:.1f}s. Tracks: {track_str}. Info: {trigger_info}\nBeklenen JSON formatı:\n{{\"summary\":\"...\", \"events\":[], \"risk\":\"Orta\", \"risk_score\":0.5, \"actions\":[], \"tools_called\":[]}}"
+        prompt = SYSTEM_PROMPT
         
         if self.generator_fn:
-            raw = self.generator_fn(prompt=prompt, image=frame)
+            raw = self.generator_fn(prompt=trigger_info, image=frame)
         else:
             with self._infer_lock:
                 import torch
@@ -118,38 +117,47 @@ class InternVLAgent:
                 
                 if self.backend == "smolvlm":
                     msgs = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}] if pil else [{"type": "text", "text": prompt}]}]
-                    text_in = self.processor.apply_chat_template(msgs, add_generation_prompt=True) + "\n```json\n{"
+                    text_in = self.processor.apply_chat_template(msgs, add_generation_prompt=True)
                     inputs = self.processor(text=text_in, images=[pil] if pil else None, return_tensors="pt").to(self.model.device)
                     with torch.no_grad():
-                        out = self.model.generate(**inputs, max_new_tokens=512, repetition_penalty=1.3)
-                    raw = "{" + self.processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:], skip_special_tokens=True)[0]
+                        out = self.model.generate(**inputs, max_new_tokens=5, repetition_penalty=1.0)
+                    raw = self.processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:], skip_special_tokens=True)[0]
                 else:
                     text_in = f"<img></img>{prompt}" if pil else prompt
                     inputs = self.tokenizer(text_in, return_tensors="pt").to(self.model.device)
-                    # Basit implementasyon
                     with torch.no_grad():
-                        out = self.model.generate(**inputs, max_new_tokens=512)
+                        out = self.model.generate(**inputs, max_new_tokens=5)
                     raw = self.tokenizer.decode(out[0], skip_special_tokens=True)
 
-        try:
-            data = extract_json_object(raw)
-            data.setdefault("risk", "Orta")
-            data.setdefault("risk_score", 0.5)
-            data.setdefault("summary", "Olay tespiti yapıldı.")
-            data.setdefault("events", [])
-            data.setdefault("actions", [])
-            data.setdefault("tools_called", [])
-            data.setdefault("frame_analyzed", frame_idx)
-            result = AnalysisResult.model_validate(data)
-        except Exception as e:
-            logger.warning(f"JSON Parse Hatası: {e}")
-            result = AnalysisResult(summary="Tehlike tespit edilemedi.", events=[], risk="Düşük", risk_score=0.1, actions=[], tools_called=[], frame_analyzed=frame_idx)
+        # Skoru parse et
+        score = extract_float_score(raw)
+        
+        # Sistemi kırmamak için AnalysisResult objesini manuel (sahte) oluşturuyoruz
+        if score > 0.7:
+            risk = "Yüksek"
+            summary = f"Tehlike Algılandı (Skor: {score:.2f})"
+        elif score > 0.4:
+            risk = "Orta"
+            summary = f"Şüpheli Durum (Skor: {score:.2f})"
+        else:
+            risk = "Düşük"
+            summary = f"Güvenli (Skor: {score:.2f})"
+            
+        result = AnalysisResult(
+            summary=summary,
+            events=[],
+            risk=risk,
+            risk_score=score,
+            actions=[],
+            tools_called=[],
+            frame_analyzed=frame_idx
+        )
             
         self.memory.add(result)
         self.last_tool_results = []
-        if execute_tools and result.tools_called:
-            self.last_tool_results = self.tools.execute_from_analysis(result.tools_called, report_data=result.model_dump_report())
-            
+        
+        # Araç çalıştırmayı kapattık çünkü model artık tool listesi üretmiyor.
+        
         return result
 
     def reset_memory(self):
@@ -157,17 +165,9 @@ class InternVLAgent:
 
 def make_mock_generator(fixed: Optional[Dict[str, Any]] = None) -> Callable[..., str]:
     def _gen(prompt: str = "", image: Any = None, **kwargs: Any) -> str:
-        if fixed: return json.dumps(fixed, ensure_ascii=False)
+        if fixed: return str(fixed.get("risk_score", 0.5))
         p = prompt.lower()
         if "motion" in p or "roi" in p:
-            return json.dumps({
-                "summary": "Hareket veya tehlike algılandı.",
-                "events": [{"time": "00:00", "event": "Hareket", "severity": "Yüksek"}],
-                "risk": "Yüksek", "risk_score": 0.8,
-                "actions": ["Güvenliği sağla"], "tools_called": ["trigger_alarm"],
-                "frame_analyzed": 0
-            }, ensure_ascii=False)
-        return json.dumps({
-            "summary": "Sakin görünüyor.", "events": [], "risk": "Düşük", "risk_score": 0.1, "actions": [], "tools_called": [], "frame_analyzed": 0
-        }, ensure_ascii=False)
+            return "0.85"
+        return "0.1"
     return _gen

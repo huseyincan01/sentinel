@@ -8,15 +8,14 @@ def main():
     parser.add_argument("--vllm", action="store_true", help="vLLM motorunu kullan (hızlı çıkarım için, Linux/GPU gerekir)")
     args = parser.parse_args()
 
-    from src.ui.app import main as launch_ui
-    launch_ui(
+    from src.ui.app import build_app
+    app = build_app()
+    app.launch(
         share=args.share,
         server_name=args.server_name,
         server_port=args.server_port,
-        use_vllm=args.vllm,
+        debug=True
     )
-
 
 if __name__ == "__main__":
     main()
-
